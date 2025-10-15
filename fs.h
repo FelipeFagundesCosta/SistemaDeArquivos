@@ -9,7 +9,9 @@
 // Nome e tamanho do disco virtual
 #define DISK_NAME "disk.dat"
 #define DISK_SIZE_MB 64
-#define BLOCK_SIZE 512
+#define MAX_INODES 128          // número total de i-nodes
+#define BLOCK_SIZE 512          // tamanho de cada bloco em bytes
+#define MAX_BLOCKS (DISK_SIZE_MB*1024*1024/BLOCK_SIZE)
 
 // Estrutura do superbloco
 typedef struct {
@@ -17,6 +19,19 @@ typedef struct {
     uint64_t disk_size;      // tamanho total do disco em bytes
     uint32_t block_size;     // tamanho de cada bloco (por exemplo, 4 KB)
 } superblock_t;
+
+
+typedef struct {
+    char name[32];
+    char creator[32];
+    char owner[32];
+    uint32_t size;
+    int creation_date; //AnoMesDiaHoraMinutoSegundo
+    int modification_date; //AnoMesDiaHoraMinutoSegundo
+    uint16_t permissions;
+    uint32_t blocks[12];  // 12 blocos diretos para simplicidade
+    uint32_t next_inode;  // se o arquivo precisar de mais i-nodes
+} inode_t;
 
 // Protótipo da função de inicialização do sistema de arquivos
 int init_fs(void);
