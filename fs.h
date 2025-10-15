@@ -13,6 +13,12 @@
 #define BLOCK_SIZE 512          // tamanho de cada bloco em bytes
 #define MAX_BLOCKS (DISK_SIZE_MB*1024*1024/BLOCK_SIZE)
 
+#define META_BLOCKS (1 \
+    + ((MAX_BLOCKS / 8 + BLOCK_SIZE - 1) / BLOCK_SIZE) \
+    + ((MAX_INODES / 8 + BLOCK_SIZE - 1) / BLOCK_SIZE) \
+    + ((sizeof(inode_t) * MAX_INODES + BLOCK_SIZE - 1) / BLOCK_SIZE))
+
+
 // Estrutura do superbloco
 typedef struct {
     uint32_t magic;          // número mágico de identificação do sistema de arquivos
@@ -34,6 +40,10 @@ typedef struct {
 } inode_t;
 
 // Protótipo da função de inicialização do sistema de arquivos
-int init_fs(void);
+int allocateBlock(FILE *disk);
+void freeBlock(FILE *disk, int block_index);
+int allocateInode(FILE *disk);
+void freeInode(FILE *disk, int inode_index);
+
 
 #endif
