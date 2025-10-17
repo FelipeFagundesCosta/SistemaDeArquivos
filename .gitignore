@@ -1,2 +1,6 @@
 disk.dat
-LICENSE
+
+*.o
+*.out
+teste
+a.out

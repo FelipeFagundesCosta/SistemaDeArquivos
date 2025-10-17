@@ -1,49 +1,64 @@
+/* fs.h */
 #ifndef FS_H
 #define FS_H
 
 #include <stdio.h>
-#include <stdint.h>  // para uint32_t, uint64_t etc.
-#include <unistd.h>  // para ftruncate()
+#include <stdint.h>
+#include <unistd.h>
 #include <stdlib.h>
+#include <sys/types.h>
 
-// Nome e tamanho do disco virtual
 #define DISK_NAME "disk.dat"
 #define DISK_SIZE_MB 64
-#define MAX_INODES 128          // número total de i-nodes
-#define BLOCK_SIZE 512          // tamanho de cada bloco em bytes
-#define MAX_BLOCKS (DISK_SIZE_MB*1024*1024/BLOCK_SIZE)
-
-#define META_BLOCKS (1 \
-    + ((MAX_BLOCKS / 8 + BLOCK_SIZE - 1) / BLOCK_SIZE) \
-    + ((MAX_INODES / 8 + BLOCK_SIZE - 1) / BLOCK_SIZE) \
-    + ((sizeof(inode_t) * MAX_INODES + BLOCK_SIZE - 1) / BLOCK_SIZE))
-
-
-// Estrutura do superbloco
-typedef struct {
-    uint32_t magic;          // número mágico de identificação do sistema de arquivos
-    uint64_t disk_size;      // tamanho total do disco em bytes
-    uint32_t block_size;     // tamanho de cada bloco (por exemplo, 4 KB)
-} superblock_t;
-
+#define MAX_INODES 128
+#define BLOCK_SIZE 512
+#define MAX_BLOCKS ((DISK_SIZE_MB * 1024 * 1024) / BLOCK_SIZE)
 
 typedef struct {
     char name[32];
     char creator[32];
     char owner[32];
     uint32_t size;
-    int creation_date; //AnoMesDiaHoraMinutoSegundo
-    int modification_date; //AnoMesDiaHoraMinutoSegundo
+    int creation_date;       
+    int modification_date;   
     uint16_t permissions;
-    uint32_t blocks[12];  // 12 blocos diretos para simplicidade
-    uint32_t next_inode;  // se o arquivo precisar de mais i-nodes
+    uint32_t blocks[12];     
+    uint32_t next_inode;     
 } inode_t;
 
-// Protótipo da função de inicialização do sistema de arquivos
-int allocateBlock(FILE *disk);
-void freeBlock(FILE *disk, int block_index);
-int allocateInode(FILE *disk);
-void freeInode(FILE *disk, int inode_index);
+/* Funções principais */
+int init_fs(void);
+int mount_fs(void);
+int sync_fs(void);
+int unmount_fs(void);
 
+/* Alocação */
+int allocateBlock(void);
+void freeBlock(int block_index);
+int allocateInode(void);
+void freeInode(int inode_index);
 
-#endif
+/* Layout */
+size_t block_bitmap_bytes(void);
+size_t inode_bitmap_bytes(void);
+size_t inode_table_bytes(void);
+size_t meta_region_bytes(void);
+off_t  offset_block_bitmap(void);
+off_t  offset_inode_bitmap(void);
+off_t  offset_inode_table(void);
+off_t  offset_data_region(void);
+
+/* Variáveis globais */
+extern unsigned char *block_bitmap;
+extern unsigned char *inode_bitmap;
+extern inode_t *inode_table;
+extern FILE *disk;
+
+/* Variáveis computadas (para testes) */
+extern size_t computed_block_bitmap_bytes;
+extern size_t computed_inode_bitmap_bytes;
+extern size_t computed_inode_table_bytes;
+extern uint32_t computed_meta_blocks;
+extern uint32_t computed_data_blocks;
+
+#endif /* FS_H */
