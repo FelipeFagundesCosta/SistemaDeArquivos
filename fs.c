@@ -148,7 +148,6 @@ int unmount_fs(void) {
     return 0;
 }
 
-/* ---- placeholders ---- */
 int allocateBlock(void) {
     for (uint32_t i = 0; i < computed_data_blocks; i++){
         uint32_t byte = i / 8;
@@ -190,4 +189,22 @@ void freeInode(int inode_index) {
         uint8_t bit = inode_index % 8;
         inode_bitmap[byte] &= ~(1 << bit);
     }
+}
+
+int readBlock(uint32_t block_index, void *buffer){
+    if (!disk || block_index >= computed_data_blocks) return -1;
+    off_t offset = offset_data_region + (off_t)block_index * BLOCK_SIZE;
+    fseek(disk, offset, SEEK_SET);
+    size_t read_bytes = fread(buffer, 1, BLOCK_SIZE, disk);
+    return (read_bytes == BLOCK_SIZE) ? 0 : -1;
+}
+
+int writeBlock(uint32_t block_index, const void *buffer){
+    if (!disk || block_index >= computed_data_blocks) return -1;
+    off_t offset = offset_data_region + (off_t)block_index * BLOCK_SIZE;
+    fseek(disk, offset, SEEK_SET);
+    size_t written_bytes = fwrite(buffer, 1, BLOCK_SIZE, disk);
+    fflush(disk);
+    fsync(fileno(disk));
+    return (written_bytes == BLOCK_SIZE) ? 0 : -1;
 }

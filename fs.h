@@ -38,6 +38,11 @@ void freeBlock(int block_index);
 int allocateInode(void);
 void freeInode(int inode_index);
 
+/* Leitura e escrita nos blocos */
+int readBlock(uint32_t block_index, void *buffer);
+int writeBlock(uint32_t block_index, const void *buffer);
+
+
 /* Layout */
 size_t block_bitmap_bytes(void);
 size_t inode_bitmap_bytes(void);
