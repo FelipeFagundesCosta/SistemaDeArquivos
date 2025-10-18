@@ -60,6 +60,15 @@ int dirFindEntry(int dir_inode, const char *name, int *out_inode);
 int dirAddEntry(int dir_inode, const char *name, int inode_index);
 int dirRemoveEntry(int dir_inode, const char *name);
 
+
+int createFile(int parent_inode, const char *name);
+int deleteFile(int parent_inode, const char *name);
+
+int createDirectory(int parent_inode, const char *name);
+int deleteteDirectory(int parent_inode, const char *name);
+
+int listElements(int parent_inode);
+
 /* Layout */
 size_t block_bitmap_bytes(void);
 size_t inode_bitmap_bytes(void);
