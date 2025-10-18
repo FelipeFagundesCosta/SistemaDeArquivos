@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <time.h>
 
 /* Globais */
 unsigned char *block_bitmap = NULL;
@@ -87,6 +88,40 @@ int init_fs(void) {
     fflush(disk);
     fsync(fileno(disk));
     rewind(disk);
+
+    // === Criação do diretório raiz (inode 0) ===
+    int root_inode = allocateInode();
+    if (root_inode != ROOT_INODE) {
+        fprintf(stderr, "Erro: inode raiz não está em 0!\n");
+        goto fail_init;
+    }
+
+    inode_t *root = &inode_table[ROOT_INODE];
+    time_t now = time(NULL);
+
+    root->type = FILE_DIRECTORY;
+    strcpy(root->name, "/");
+    root->creation_date = now;
+    root->modification_date = now;
+    root->size = 0;
+
+    int block = allocateBlock();
+    if (block < 0) goto fail_init;
+    root->blocks[0] = block;
+
+    dir_entry_t entries[BLOCK_SIZE / sizeof(dir_entry_t)] = {0};
+
+    // "." aponta para si mesmo, ".." também (pois root não tem pai)
+    strcpy(entries[0].name, ".");
+    entries[0].inode_index = ROOT_INODE;
+    strcpy(entries[1].name, "..");
+    entries[1].inode_index = ROOT_INODE;
+
+    if (writeBlock(block, entries) != 0) goto fail_init;
+
+    sync_fs();
+    rewind(disk);
+
     return 0;
 
 fail_init:
@@ -253,7 +288,6 @@ int dirAddEntry(int dir_inode, const char *name, int inode_index){
     while (current_inode >= 0) {
         inode_t *dir = &inode_table[current_inode];
         if (dir->type != FILE_DIRECTORY) return -1;
-        dir->type = FILE_DIRECTORY; // garante tipo
 
         // garante pelo menos um bloco alocado
         if (dir->blocks[0] == 0) {
@@ -277,6 +311,10 @@ int dirAddEntry(int dir_inode, const char *name, int inode_index){
                     buffer[j].name[sizeof(buffer[j].name)-1] = '\0';
                     buffer[j].inode_index = inode_index;
                     if (writeBlock(block_index, buffer) != 0) return -1;
+
+                    inode_table[dir_inode].size += sizeof(dir_entry_t);
+                    inode_table[dir_inode].modification_date = time(NULL);
+
                     return 0;
                 }
             }
@@ -286,7 +324,7 @@ int dirAddEntry(int dir_inode, const char *name, int inode_index){
         if (dir->next_inode == 0) {
             int next = allocateInode();
             if (next < 0) return -1;
-            printf("passou7");
+            memset(&inode_table[next], 0, sizeof(inode_t));
             dir->next_inode = next;
             inode_table[next].type = FILE_DIRECTORY;
         }
@@ -294,7 +332,6 @@ int dirAddEntry(int dir_inode, const char *name, int inode_index){
     }
 
     return -1;
-    printf("passou8");
 }
 
 
@@ -328,6 +365,10 @@ int dirRemoveEntry(int dir_inode, const char *name){
                         }
                     }
                     freeInode(target_inode);
+
+                    inode_table[dir_inode].size -= sizeof(dir_entry_t);
+                    inode_table[dir_inode].modification_date = time(NULL);
+
                     return 0;
                 }
             }
@@ -338,4 +379,188 @@ int dirRemoveEntry(int dir_inode, const char *name){
     return -1;
 }
 
+int createDirectory(int parent_inode, const char *name){
+    if (parent_inode < 0|| !name) return -1;
+    int dummy_output;
+    if (dirFindEntry(parent_inode, name, &dummy_output) == 0) return -1;
+
+    int new_inode_index = allocateInode();
+    if (new_inode_index < 0) return -1;
+
+    inode_t *new_inode = &inode_table[new_inode_index];
+
+    time_t now = time(NULL);
+
+    new_inode->type = FILE_DIRECTORY;
+    strncpy(new_inode->name, name, sizeof(new_inode->name)-1);
+    new_inode->name[sizeof(new_inode->name)-1] = '\0';
+    new_inode->creation_date = now;
+    new_inode->modification_date = now;
+    new_inode->size = 0;
+    /*
+    implementar creator, owner, permissions
+    */
+
+    int block = allocateBlock();
+    if (block < 0) return -1;
+    new_inode->blocks[0] = block;
+
+    dir_entry_t entries[BLOCK_SIZE / sizeof(dir_entry_t)] = {0};
+
+    strncpy(entries[0].name, ".", sizeof(entries[0].name));
+    entries[0].inode_index = new_inode_index;
+    strncpy(entries[1].name, "..", sizeof(entries[1].name));
+    entries[1].inode_index = parent_inode;
+
+    if (writeBlock(block, entries) != 0) return -1;
+    
+    if (dirAddEntry(parent_inode, name, new_inode_index) != 0) return -1;
+    sync_fs();
+    return 0;
+}
+
+int deleteDirectory(int parent_inode, const char *name){
+    if (parent_inode < 0|| !name) return -1;
+    int target_inode;
+    if (dirFindEntry(parent_inode, name, &target_inode) != 0) return -1;
+
+    inode_t *target = &inode_table[target_inode];
+    if (target->type != FILE_DIRECTORY) return -1;
+
+    for (int i = 0; i < BLOCKS_PER_INODE; i++) {
+        if (target->blocks[i] == 0) continue;
+        dir_entry_t entries[BLOCK_SIZE / sizeof(dir_entry_t)];
+        if (readBlock(target->blocks[i], entries) != 0) return -1;
+        for (int j = 0; j < BLOCK_SIZE / sizeof(dir_entry_t); j++) {
+            if (entries[j].inode_index != 0 &&
+                strcmp(entries[j].name, ".") != 0 &&
+                strcmp(entries[j].name, "..") != 0) {
+                return -1;
+            }
+        }
+    }
+
+    if (dirRemoveEntry(parent_inode, name) != 0) return -1;
+    freeInode(target_inode);
+    sync_fs();
+    return 0;
+
+}
+
+int createFile(int parent_inode, const char *name){
+    if (parent_inode < 0|| !name) return -1;
+    int dummy_output;
+    if (dirFindEntry(parent_inode, name, &dummy_output) == 0) return -1;
+
+    int new_inode_index = allocateInode();
+    if (new_inode_index < 0) return -1;
+    inode_t *new_inode = &inode_table[new_inode_index];
+
+    time_t now = time(NULL);
+
+    new_inode->type = FILE_REGULAR;
+    strncpy(new_inode->name, name, sizeof(new_inode->name)-1);
+    new_inode->name[sizeof(new_inode->name)-1] = '\0';
+    new_inode->creation_date = now;
+    new_inode->modification_date = now;
+    new_inode->size = 0;
+    /*
+    implementar creator, owner, permissions
+    */
+
+    if (dirAddEntry(parent_inode, name, new_inode_index) != 0) return -1;
+    sync_fs();
+    return 0;
+}
+
+int deleteFile(int parent_inode, const char *name){
+    if (parent_inode < 0|| !name) return -1;
+    int target_inode;
+    if (dirFindEntry(parent_inode, name, &target_inode) == -1) return -1;
+
+    inode_t *target = &inode_table[target_inode];
+    if (target->type != FILE_REGULAR) return -1;
+
+    for (int i = 0; i < BLOCKS_PER_INODE; i++) {
+        if (target->blocks[i] != 0)
+            freeBlock(target->blocks[i]);
+    }
+
+    if (dirRemoveEntry(parent_inode, name) == -1) return -1;
+    freeInode(target_inode);
+    sync_fs();
+    return 0;
+}
+
+fs_dir_list_t listElements(int parent_inode) {
+    fs_dir_list_t result = {NULL, 0};
+
+    if (parent_inode < 0 || parent_inode >= MAX_INODES) return result;
+
+    inode_t *dir = &inode_table[parent_inode];
+    if (dir->type != FILE_DIRECTORY) return result;
+
+    int capacity = 16; // capacidade inicial do array
+    fs_entry_t *temp = calloc(capacity, sizeof(fs_entry_t));
+    if (!temp) return result;
+
+    int count = 0;
+    int current_inode = parent_inode;
+
+    while (current_inode >= 0) {
+        dir = &inode_table[current_inode];
+
+        for (int i = 0; i < BLOCKS_PER_INODE; i++) {
+            uint32_t block_index = dir->blocks[i];
+            if (block_index == 0) continue;
+
+            dir_entry_t entries[BLOCK_SIZE / sizeof(dir_entry_t)];
+            if (readBlock(block_index, entries) != 0) continue;
+
+            for (int j = 0; j < BLOCK_SIZE / sizeof(dir_entry_t); j++) {
+                if (entries[j].inode_index == 0) continue;
+                if (strcmp(entries[j].name, ".") == 0 || strcmp(entries[j].name, "..") == 0) continue;
+
+                inode_t *child = &inode_table[entries[j].inode_index];
+
+                if (count >= capacity) {
+                    capacity *= 2;
+                    fs_entry_t *new_temp = realloc(temp, capacity * sizeof(fs_entry_t));
+                    if (!new_temp) {
+                        free(temp);
+                        result.entries = NULL;
+                        result.count = 0;
+                        return result;
+                    }
+                    temp = new_temp;
+                }
+
+                fs_entry_t *entry = &temp[count++];
+                entry->inode_index = entries[j].inode_index;
+                entry->type = child->type;
+
+                strncpy(entry->name, child->name, MAX_NAMESIZE - 1);
+                entry->name[MAX_NAMESIZE - 1] = '\0';
+
+                strncpy(entry->creator, child->creator, MAX_NAMESIZE - 1);
+                entry->creator[MAX_NAMESIZE - 1] = '\0';
+
+                strncpy(entry->owner, child->owner, MAX_NAMESIZE - 1);
+                entry->owner[MAX_NAMESIZE - 1] = '\0';
+
+                entry->size = child->size;
+                entry->permissions = child->permissions;
+                entry->creation_date = child->creation_date;
+                entry->modification_date = child->modification_date;
+            }
+        }
+
+        if (dir->next_inode == 0) break;
+        current_inode = dir->next_inode;
+    }
+
+    result.entries = temp;
+    result.count = count;
+    return result;
+}
 
