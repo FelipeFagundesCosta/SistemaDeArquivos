@@ -111,6 +111,7 @@ int resolvePath(const char *path, int *inode_out);
 int createSymlink(int parent_inode, int target_index, const char *link_name, inode_type_t type, const char *user);
 
 // IMPLEMENTAR ESSAS
+// escolher um para implementar, criar branch a partir da develop com o nome da funcao que pretende implementar (ex: cd_branch)
 int cmd_cd();
 int cmd_mkdir();
 int cmd_touch();
