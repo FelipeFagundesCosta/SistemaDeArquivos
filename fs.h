@@ -22,8 +22,20 @@
 typedef enum {
     FILE_REGULAR,
     FILE_DIRECTORY,
-    FILE_SYMLINK
+    FILE_SYMLINK,
+    FILE_ANY
 } inode_type_t;
+typedef enum {
+    PERM_NONE  = 0,        // 000 000 000
+    PERM_EXEC  = 1 << 0,   // 001
+    PERM_WRITE = 1 << 1,   // 010
+    PERM_READ  = 1 << 2,   // 100
+
+    PERM_RX    = PERM_READ | PERM_EXEC,    
+    PERM_RWX   = PERM_READ | PERM_WRITE | PERM_EXEC,   // 111
+
+    PERM_ALL   = (PERM_RWX << 6) | (PERM_RWX << 3) | PERM_RWX
+} permission_t;
 
 typedef struct {
     inode_type_t type;
@@ -33,7 +45,7 @@ typedef struct {
     uint32_t size;
     time_t creation_date;       
     time_t modification_date;   
-    uint16_t permissions;
+    permission_t permissions;
     uint32_t blocks[BLOCKS_PER_INODE];
     uint32_t next_inode;     
 } inode_t;
@@ -82,7 +94,7 @@ int dirAddEntry(int dir_inode, const char *name, inode_type_t type, int inode_in
 int dirRemoveEntry(int dir_inode, const char *name, inode_type_t type);
 
 /* Permissões */
-int hasPermission(inode_t *inode, const char *user, char mode);
+int hasPermission(const inode_t *inode, const char *username, permission_t perm);
 
 /* Manipulação de conteúdos */
 int createDirectory(int parent_inode, const char *name, const char *user);
@@ -93,6 +105,8 @@ fs_dir_list_t listElements(int parent_inode);
 int addContentToFile(int parent_inode, const char *name, const char *content, const char *user);
 ssize_t getFileSize(int parent_inode, const char *name);
 int readContentFromFile(int parent_inode, const char *name, char *buffer, size_t buffer_size, size_t *out_bytes, const char *user);
+
+int resolvePath(const char *path, int *inode_out);
 
 /* Layout */
 size_t block_bitmap_bytes(void);

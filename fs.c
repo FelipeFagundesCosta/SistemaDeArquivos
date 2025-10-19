@@ -101,9 +101,12 @@ int init_fs(void) {
 
     root->type = FILE_DIRECTORY;
     strcpy(root->name, "~");
+    strcpy(root->creator, "root");
+    strcpy(root->owner, "root");
     root->creation_date = now;
     root->modification_date = now;
     root->size = 0;
+    root->permissions = PERM_ALL;
 
     int block = allocateBlock();
     if (block < 0) goto fail_init;
@@ -265,7 +268,7 @@ int dirFindEntry(int dir_inode, const char *name, inode_type_t type, int *out_in
             if (readBlock(dir->blocks[i], buffer) != 0) return -1;
 
             for (int j = 0; j < BLOCK_SIZE / sizeof(dir_entry_t); j++) {
-                if (buffer[j].inode_index != 0 && strcmp(buffer[j].name, name) == 0 && inode_table[buffer[j].inode_index].type == type) {
+                if (buffer[j].inode_index != 0 && strcmp(buffer[j].name, name) == 0 && (inode_table[buffer[j].inode_index].type == type || type == FILE_ANY)) {
                     *out_inode = buffer[j].inode_index;
                     return 0;
                 }
@@ -392,21 +395,12 @@ int dirRemoveEntry(int dir_inode, const char *name, inode_type_t type){
     return -1;
 }
 
-int hasPermission(inode_t *inode, const char *user, char mode) {
-    int perm = inode->permissions;
-
-    if (strcmp(inode->owner, user) == 0) {
-        // dono
-        if (mode == 'r') return perm & 0400;
-        if (mode == 'w') return perm & 0200;
-        if (mode == 'x') return perm & 0100;
+int hasPermission(const inode_t *inode, const char *username, permission_t perm) {
+    if (strcmp(inode->owner, username) == 0) {
+        return ((inode->permissions >> 6) & PERM_RWX) & perm;
     } else {
-        // outros
-        if (mode == 'r') return perm & 0004;
-        if (mode == 'w') return perm & 0002;
-        if (mode == 'x') return perm & 0001;
+        return (inode->permissions & PERM_RWX) & perm;
     }
-    return 0;
 }
 
 
@@ -417,7 +411,7 @@ int createDirectory(int parent_inode, const char *name, const char *user){
 
     inode_t *parent= &inode_table[parent_inode];
     if (parent_inode != ROOT_INODE){
-    if (!hasPermission(parent, user, 'w')) return -1;
+    if (!hasPermission(parent, user, PERM_WRITE)) return -1;
     }
 
     int new_inode_index = allocateInode();
@@ -437,7 +431,7 @@ int createDirectory(int parent_inode, const char *name, const char *user){
     new_inode->creator[MAX_NAMESIZE-1] = '\0';
     strncpy(new_inode->owner, user, MAX_NAMESIZE-1);
     new_inode->owner[MAX_NAMESIZE-1] = '\0';
-    new_inode->permissions = 0644;
+    new_inode->permissions = PERM_RWX << 6 | PERM_RX << 3 | PERM_RX;
 
     int block = allocateBlock();
     if (block < 0) return -1;
@@ -464,7 +458,7 @@ int deleteDirectory(int parent_inode, const char *name, const char *user){
 
     if (parent_inode == ROOT_INODE) return -1;
     inode_t *inode = &inode_table[target_inode];
-    if (!hasPermission(inode, user, 'w')) return -1;
+    if (!hasPermission(inode, user, PERM_WRITE)) return -1;
 
     inode_t *target = &inode_table[target_inode];
     if (target->type != FILE_DIRECTORY) return -1;
@@ -496,7 +490,7 @@ int createFile(int parent_inode, const char *name, const char *user){
 
     inode_t *parent= &inode_table[parent_inode];
     if (parent_inode != ROOT_INODE){
-    if (!hasPermission(parent, user, 'w')) return -1;
+    if (!hasPermission(parent, user, PERM_WRITE)) return -1;
     }
 
     int new_inode_index = allocateInode();
@@ -515,7 +509,7 @@ int createFile(int parent_inode, const char *name, const char *user){
     new_inode->creator[MAX_NAMESIZE-1] = '\0';
     strncpy(new_inode->owner, user, MAX_NAMESIZE-1);
     new_inode->owner[MAX_NAMESIZE-1] = '\0';
-    new_inode->permissions = 0644;
+    new_inode->permissions = PERM_RWX << 6 | PERM_RX << 3 | PERM_RX;
 
     if (dirAddEntry(parent_inode, name, FILE_REGULAR, new_inode_index) != 0) return -1;
     sync_fs();
@@ -528,7 +522,7 @@ int deleteFile(int parent_inode, const char *name, const char *user){
     if (dirFindEntry(parent_inode, name, FILE_REGULAR, &target_inode) == -1) return -1;
 
     inode_t *target = &inode_table[target_inode];
-    if (!hasPermission(target, user, 'w')) return -1;
+    if (!hasPermission(target, user, PERM_WRITE)) return -1;
 
     if (target->type != FILE_REGULAR) return -1;
 
@@ -622,7 +616,7 @@ int addContentToFile(int parent_inode, const char *name, const char *content, co
     if (dirFindEntry(parent_inode, name, FILE_REGULAR, &target_inode) != 0) return -1;
 
     inode_t *inode = &inode_table[target_inode];
-    if (!hasPermission(inode, user, 'w')) return -1;
+    if (!hasPermission(inode, user, PERM_WRITE)) return -1;
     
 
     inode_t *file_inode = &inode_table[target_inode];
@@ -709,7 +703,7 @@ int readContentFromFile(int parent_inode, const char *name, char *buffer, size_t
     }
 
     inode_t *inode = &inode_table[target_inode];
-    if (!hasPermission(inode, user, 'r')) return -1;
+    if (!hasPermission(inode, user, PERM_READ)) return -1;
 
     if (!inode) {
         *out_bytes = 0;
@@ -746,5 +740,53 @@ int readContentFromFile(int parent_inode, const char *name, char *buffer, size_t
     buffer[total_size] = '\0';
     *out_bytes = total_size;
     return 0;
+}
+
+int resolvePath(const char *path, int *inode_out) {
+    if (!path || !inode_out) return -1;
+
+    int current;
+    // Caminho absoluto ou relativo
+    if (path[0] == '~') {
+        current = ROOT_INODE;
+    }
+
+    char token[256];
+    const char *p = path;
+    while (*p) {
+        // Extrair o próximo token
+        int i = 0;
+        while (*p && *p != '/') token[i++] = *p++;
+        token[i] = '\0';
+        if (*p == '/') p++; // pula a barra
+
+        if (strcmp(token, ".") == 0 || token[0] == '\0') {
+            // "." ou token vazio (duas barras consecutivas), não faz nada
+            continue;
+        }
+
+        if (strcmp(token, "..") == 0) {
+            // sobe um nível
+            if (current == ROOT_INODE) continue; // já está na raiz
+            int parent_inode;
+            if (!dirFindEntry(current, "..", FILE_DIRECTORY, &parent_inode)) {
+                // falha ao encontrar o pai
+                return -1;
+            }
+            current = parent_inode;
+            continue;
+        }
+
+        // token normal: desce para o diretório/arquivo
+        int next_inode;
+        if (!dirFindEntry(current, token, FILE_DIRECTORY, &next_inode)) {
+            // falha ao encontrar a entrada
+            return -1;
+        }
+        current = next_inode;
+    }
+
+    *inode_out = current;
+    return 1; // sucesso
 }
 
