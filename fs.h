@@ -110,6 +110,7 @@ int resolvePath(const char *path, int *inode_out);
 
 int createSymlink(int parent_inode, int target_index, const char *link_name, inode_type_t type, const char *user);
 
+// IMPLEMENTAR ESSAS
 int cmd_cd();
 int cmd_mkdir();
 int cmd_touch();
