@@ -60,8 +60,6 @@ typedef struct {
     int count;
 } fs_dir_list_t;
 
-
-
 /* Funções principais */
 int init_fs(void);
 int mount_fs(void);
@@ -78,19 +76,23 @@ void freeInode(int inode_index);
 int readBlock(uint32_t block_index, void *buffer);
 int writeBlock(uint32_t block_index, const void *buffer);
 
-
-int dirFindEntry(int dir_inode, const char *name, inode_type_t type,int *out_inode);
-int dirAddEntry(int dir_inode, const char *name, inode_type_t type,int inode_index);
+/* Diretórios */
+int dirFindEntry(int dir_inode, const char *name, inode_type_t type, int *out_inode);
+int dirAddEntry(int dir_inode, const char *name, inode_type_t type, int inode_index);
 int dirRemoveEntry(int dir_inode, const char *name, inode_type_t type);
 
-/* Manipulação de conteudos */
-int createDirectory(int parent_inode, const char *name);
-int deleteDirectory(int parent_inode, const char *name);
-int createFile(int parent_inode, const char *name);
-int deleteFile(int parent_inode, const char *name);
+/* Permissões */
+int hasPermission(inode_t *inode, const char *user, char mode);
+
+/* Manipulação de conteúdos */
+int createDirectory(int parent_inode, const char *name, const char *user);
+int deleteDirectory(int parent_inode, const char *name, const char *user);
+int createFile(int parent_inode, const char *name, const char *user);
+int deleteFile(int parent_inode, const char *name, const char *user);
 fs_dir_list_t listElements(int parent_inode);
-int addContentToFile(int parent_inode, const char *name, const char *content);
-int readContentFromFile(int parent_inode, const char *name);
+int addContentToFile(int parent_inode, const char *name, const char *content, const char *user);
+ssize_t getFileSize(int parent_inode, const char *name);
+int readContentFromFile(int parent_inode, const char *name, char *buffer, size_t buffer_size, size_t *out_bytes, const char *user);
 
 /* Layout */
 size_t block_bitmap_bytes(void);

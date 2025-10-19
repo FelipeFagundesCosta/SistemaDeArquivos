@@ -100,7 +100,7 @@ int init_fs(void) {
     time_t now = time(NULL);
 
     root->type = FILE_DIRECTORY;
-    strcpy(root->name, "/");
+    strcpy(root->name, "~");
     root->creation_date = now;
     root->modification_date = now;
     root->size = 0;
@@ -280,7 +280,7 @@ int dirFindEntry(int dir_inode, const char *name, inode_type_t type, int *out_in
 }
 
 int dirAddEntry(int dir_inode, const char *name, inode_type_t type, int inode_index) {
-    if (dir_inode < 0 || dir_inode >= MAX_INODES || !name || !inode_index) return -1;
+    if (dir_inode < 0 || dir_inode >= MAX_INODES || !name) return -1;
 
     // evita duplicados
     int found;
@@ -392,10 +392,33 @@ int dirRemoveEntry(int dir_inode, const char *name, inode_type_t type){
     return -1;
 }
 
-int createDirectory(int parent_inode, const char *name){
-    if (parent_inode < 0|| !name) return -1;
+int hasPermission(inode_t *inode, const char *user, char mode) {
+    int perm = inode->permissions;
+
+    if (strcmp(inode->owner, user) == 0) {
+        // dono
+        if (mode == 'r') return perm & 0400;
+        if (mode == 'w') return perm & 0200;
+        if (mode == 'x') return perm & 0100;
+    } else {
+        // outros
+        if (mode == 'r') return perm & 0004;
+        if (mode == 'w') return perm & 0002;
+        if (mode == 'x') return perm & 0001;
+    }
+    return 0;
+}
+
+
+int createDirectory(int parent_inode, const char *name, const char *user){
+    if (parent_inode < 0 || parent_inode >= MAX_INODES || !name || !user) return -1;
     int dummy_output;
     if (dirFindEntry(parent_inode, name, FILE_DIRECTORY, &dummy_output) == 0) return -1;
+
+    inode_t *parent= &inode_table[parent_inode];
+    if (parent_inode != ROOT_INODE){
+    if (!hasPermission(parent, user, 'w')) return -1;
+    }
 
     int new_inode_index = allocateInode();
     if (new_inode_index < 0) return -1;
@@ -405,14 +428,16 @@ int createDirectory(int parent_inode, const char *name){
     time_t now = time(NULL);
 
     new_inode->type = FILE_DIRECTORY;
-    strncpy(new_inode->name, name, sizeof(new_inode->name)-1);
-    new_inode->name[sizeof(new_inode->name)-1] = '\0';
+    strncpy(new_inode->name, name, MAX_NAMESIZE-1);
+    new_inode->name[MAX_NAMESIZE-1] = '\0';
     new_inode->creation_date = now;
     new_inode->modification_date = now;
     new_inode->size = 0;
-    /*
-    implementar creator, owner, permissions
-    */
+    strncpy(new_inode->creator, user, MAX_NAMESIZE-1);
+    new_inode->creator[MAX_NAMESIZE-1] = '\0';
+    strncpy(new_inode->owner, user, MAX_NAMESIZE-1);
+    new_inode->owner[MAX_NAMESIZE-1] = '\0';
+    new_inode->permissions = 0644;
 
     int block = allocateBlock();
     if (block < 0) return -1;
@@ -432,10 +457,14 @@ int createDirectory(int parent_inode, const char *name){
     return 0;
 }
 
-int deleteDirectory(int parent_inode, const char *name){
-    if (parent_inode < 0|| !name) return -1;
+int deleteDirectory(int parent_inode, const char *name, const char *user){
+    if (parent_inode < 0 || parent_inode >= MAX_INODES || !name) return -1;
     int target_inode;
     if (dirFindEntry(parent_inode, name, FILE_DIRECTORY, &target_inode) != 0) return -1;
+
+    if (parent_inode == ROOT_INODE) return -1;
+    inode_t *inode = &inode_table[target_inode];
+    if (!hasPermission(inode, user, 'w')) return -1;
 
     inode_t *target = &inode_table[target_inode];
     if (target->type != FILE_DIRECTORY) return -1;
@@ -460,10 +489,15 @@ int deleteDirectory(int parent_inode, const char *name){
 
 }
 
-int createFile(int parent_inode, const char *name){
-    if (parent_inode < 0|| !name) return -1;
+int createFile(int parent_inode, const char *name, const char *user){
+    if (parent_inode < 0 || parent_inode >= MAX_INODES || !name) return -1;
     int dummy_output;
     if (dirFindEntry(parent_inode, name, FILE_REGULAR, &dummy_output) == 0) return -1;
+
+    inode_t *parent= &inode_table[parent_inode];
+    if (parent_inode != ROOT_INODE){
+    if (!hasPermission(parent, user, 'w')) return -1;
+    }
 
     int new_inode_index = allocateInode();
     if (new_inode_index < 0) return -1;
@@ -472,26 +506,30 @@ int createFile(int parent_inode, const char *name){
     time_t now = time(NULL);
 
     new_inode->type = FILE_REGULAR;
-    strncpy(new_inode->name, name, sizeof(new_inode->name)-1);
-    new_inode->name[sizeof(new_inode->name)-1] = '\0';
+    strncpy(new_inode->name, name, MAX_NAMESIZE-1);
+    new_inode->name[MAX_NAMESIZE-1] = '\0';
     new_inode->creation_date = now;
     new_inode->modification_date = now;
     new_inode->size = 0;
-    /*
-    implementar creator, owner, permissions
-    */
+    strncpy(new_inode->creator, user, MAX_NAMESIZE-1);
+    new_inode->creator[MAX_NAMESIZE-1] = '\0';
+    strncpy(new_inode->owner, user, MAX_NAMESIZE-1);
+    new_inode->owner[MAX_NAMESIZE-1] = '\0';
+    new_inode->permissions = 0644;
 
     if (dirAddEntry(parent_inode, name, FILE_REGULAR, new_inode_index) != 0) return -1;
     sync_fs();
     return 0;
 }
 
-int deleteFile(int parent_inode, const char *name){
-    if (parent_inode < 0|| !name) return -1;
+int deleteFile(int parent_inode, const char *name, const char *user){
+    if (parent_inode < 0 || parent_inode >= MAX_INODES || !name) return -1;
     int target_inode;
     if (dirFindEntry(parent_inode, name, FILE_REGULAR, &target_inode) == -1) return -1;
 
     inode_t *target = &inode_table[target_inode];
+    if (!hasPermission(target, user, 'w')) return -1;
+
     if (target->type != FILE_REGULAR) return -1;
 
     for (int i = 0; i < BLOCKS_PER_INODE; i++) {
@@ -577,7 +615,136 @@ fs_dir_list_t listElements(int parent_inode) {
     return result;
 }
 
-int addContentToFile(int parent_inode, const char *name, const char *content){
+int addContentToFile(int parent_inode, const char *name, const char *content, const char *user) {
+    if (!name || !content || parent_inode < 0 || parent_inode >= MAX_INODES) return -1;
+
+    int target_inode;
+    if (dirFindEntry(parent_inode, name, FILE_REGULAR, &target_inode) != 0) return -1;
+
+    inode_t *inode = &inode_table[target_inode];
+    if (!hasPermission(inode, user, 'w')) return -1;
     
+
+    inode_t *file_inode = &inode_table[target_inode];
+
+    // --- Liberar blocos antigos ---
+    int current_inode_idx = target_inode;
+    while (current_inode_idx != 0) {
+        inode_t *cur_inode = &inode_table[current_inode_idx];
+
+        for (int i = 0; i < BLOCKS_PER_INODE; i++) {
+            if (cur_inode->blocks[i] != 0) {
+                freeBlock(cur_inode->blocks[i]);
+                cur_inode->blocks[i] = 0;
+            }
+        }
+
+        int next = cur_inode->next_inode;
+        if (current_inode_idx != target_inode && next != 0) freeInode(current_inode_idx);
+        cur_inode->next_inode = 0;
+        current_inode_idx = next;
+    }
+
+    file_inode->size = 0;
+    file_inode->modification_date = time(NULL);
+
+    // --- Escrever novo conteúdo ---
+    size_t content_len = strlen(content);
+    size_t written = 0;
+    inode_t *cur_inode = file_inode;
+
+    while (written < content_len) {
+        for (int i = 0; i < BLOCKS_PER_INODE && written < content_len; i++) {
+            if (cur_inode->blocks[i] == 0) {
+                int new_block = allocateBlock();
+                if (new_block < 0) return -1;
+                cur_inode->blocks[i] = new_block;
+            }
+
+            char buffer[BLOCK_SIZE] = {0};
+            size_t chunk_size = (content_len - written > BLOCK_SIZE) ? BLOCK_SIZE : (content_len - written);
+            memcpy(buffer, content + written, chunk_size);
+
+            if (writeBlock(cur_inode->blocks[i], buffer) != 0) return -1;
+            written += chunk_size;
+        }
+
+        // precisa de um novo inode?
+        if (written < content_len) {
+            int next_inode_idx = allocateInode();
+            if (next_inode_idx < 0) return -1;
+
+            inode_t *next_inode = &inode_table[next_inode_idx];
+            memset(next_inode, 0, sizeof(inode_t));
+            next_inode->type = FILE_REGULAR;
+
+            cur_inode->next_inode = next_inode_idx;
+            cur_inode = next_inode;
+        }
+    }
+
+    file_inode->size = content_len;
+    file_inode->modification_date = time(NULL);
+    return sync_fs();
+}
+
+ssize_t getFileSize(int parent_inode, const char *name) {
+    int file_inode_index;
+    if (dirFindEntry(parent_inode, name, FILE_REGULAR, &file_inode_index) != 0)
+        return -1;
+
+    inode_t *inode = &inode_table[file_inode_index];
+    if (!inode) return -1;
+
+    return inode->size;
+}
+
+int readContentFromFile(int parent_inode, const char *name, char *buffer, size_t buffer_size, size_t *out_bytes, const char *user) {
+    if (!name || !buffer || !out_bytes) return -1;
+
+    int target_inode;
+    if (dirFindEntry(parent_inode, name, FILE_REGULAR, &target_inode) != 0) {
+        *out_bytes = 0;
+        return -1;
+    }
+
+    inode_t *inode = &inode_table[target_inode];
+    if (!hasPermission(inode, user, 'r')) return -1;
+
+    if (!inode) {
+        *out_bytes = 0;
+        return -1;
+    }
+
+    size_t total_size = inode->size;
+    if (buffer_size < total_size + 1) return -1;
+
+    size_t offset = 0;
+    inode_t *current = inode;
+
+    while (current) {
+        for (int i = 0; i < BLOCKS_PER_INODE; i++) {
+            if (current->blocks[i] == 0) continue;
+
+            char block_buffer[BLOCK_SIZE];
+            if (readBlock(current->blocks[i], block_buffer) != 0) return -1;
+
+            size_t to_copy = BLOCK_SIZE;
+            if (offset + to_copy > total_size) to_copy = total_size - offset;
+
+            memcpy(buffer + offset, block_buffer, to_copy);
+            offset += to_copy;
+        }
+
+        if (current->next_inode != 0) {
+            current = &inode_table[current->next_inode];
+        } else {
+            current = NULL;
+        }
+    }
+
+    buffer[total_size] = '\0';
+    *out_bytes = total_size;
+    return 0;
 }
 
