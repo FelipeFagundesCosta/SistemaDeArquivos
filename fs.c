@@ -852,6 +852,15 @@ int cmd_mkdir(const char *path, const char *name, const char *user){
     return 0;
 }
 
+int cmd_touch(const char *path, const char *name, const char *user){
+    if (!path || !name || !user) return -1;
+
+    int parent;
+    if (resolvePath(path, &parent) != 0) return -1;
+
+    if (createFile(parent, name, user) != 0) return -1;
+    return 0;
+}
 
 
 

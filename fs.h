@@ -114,7 +114,7 @@ int createSymlink(int parent_inode, int target_index, const char *link_name, ino
 // escolher um para implementar, criar branch a partir da develop com o nome da funcao que pretende implementar (ex: cd_branch)
 int cmd_cd();
 int cmd_mkdir(const char *path, const char *name, const char *user);
-int cmd_touch();
+int cmd_touch(const char *path, const char *name, const char *user);
 int cmd_echo_arrow();
 int cmd_echo_arrow_arrow();
 int cmd_cat();
