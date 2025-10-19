@@ -862,5 +862,61 @@ int cmd_touch(const char *path, const char *name, const char *user){
     return 0;
 }
 
+int cmd_echo_arrow(const char *path, const char *name, const char *content, const char *user){
+    if (!path || !name || !content ||!user) return -1;
+
+    int parent;
+    if (resolvePath(path, &parent) != 0) return -1;
+
+    int inode;
+    if (dirFindEntry(parent, name, FILE_REGULAR, &inode) != 0){
+        if (createFile(parent, name, user) != 0) return -1;
+    }
+
+    
+    if (addContentToFile(parent, name, content, user) != 0) return -1;
+        
+    
+    return 0;
+}
+
+int cmd_echo_arrow_arrow(const char *path, const char *name, const char *content, const char *user) {
+    if (!path || !name || !content || !user) return -1;
+
+    int parent;
+    if (resolvePath(path, &parent) != 0) return -1;
+
+    int inode_index;
+    if (dirFindEntry(parent, name, FILE_REGULAR, &inode_index) == 0) {
+        inode_t *inode = &inode_table[inode_index];
+        size_t current_size = inode->size;
+        size_t content_size = strlen(content);
+        size_t buffer_size = current_size + content_size + 1;
+
+        char *buffer = malloc(buffer_size);
+        if (!buffer) return -1;
+
+        size_t bytes_read;
+        if (readContentFromFile(parent, name, buffer, buffer_size, &bytes_read, user) != 0) {
+            free(buffer);
+            return -1;
+        }
+
+        memcpy(buffer + bytes_read, content, content_size);
+        buffer[bytes_read + content_size] = '\0';
+
+        if (addContentToFile(parent, name, buffer, user) != 0) {
+            free(buffer);
+            return -1;
+        }
+
+        free(buffer);
+    } else {
+        if (createFile(parent, name, user) != 0) return -1;
+        if (addContentToFile(parent, name, content, user) != 0) return -1;
+    }
+
+    return 0;
+}
 
 

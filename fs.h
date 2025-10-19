@@ -115,8 +115,8 @@ int createSymlink(int parent_inode, int target_index, const char *link_name, ino
 int cmd_cd();
 int cmd_mkdir(const char *path, const char *name, const char *user);
 int cmd_touch(const char *path, const char *name, const char *user);
-int cmd_echo_arrow();
-int cmd_echo_arrow_arrow();
+int cmd_echo_arrow(const char *path, const char *name, const char *content, const char *user);
+int cmd_echo_arrow_arrow(const char *path, const char *name, const char *content, const char *user);
 int cmd_cat();
 int cmd_cp();
 int cmd_mv();
