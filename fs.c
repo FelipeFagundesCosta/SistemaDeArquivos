@@ -789,10 +789,10 @@ int resolvePath(const char *path, int *inode_out) {
 
         // token normal: desce para o diretório/arquivo
         int next_inode;
-        if (!dirFindEntry(current, token, FILE_DIRECTORY, &next_inode)) {
-            // falha ao encontrar a entrada
-            return -1;
-        }
+        const char *next_slash = strchr(p, '/');
+        int type = next_slash ? FILE_DIRECTORY : FILE_ANY; // último token pode ser arquivo
+        if (dirFindEntry(current, token, type, &next_inode) != 0) return -1;
+        
         int depth = 0;
         while (inode_table[next_inode].link_target_index != -1) {
             next_inode = inode_table[next_inode].link_target_index;
@@ -931,4 +931,9 @@ int cmd_echo_arrow_arrow(const char *path, const char *name, const char *content
     return 0;
 }
 
+int cmd_cp(){
+    
+}
 
+int cmd_mv();
+int cmd_ls_s();

@@ -120,7 +120,7 @@ int cmd_echo_arrow_arrow(const char *path, const char *name, const char *content
 int cmd_cat();
 int cmd_cp();
 int cmd_mv();
-int cmd_ln();
+int cmd_ln_s();
 int cmd_ls();
 int cmd_rm();
 int cmd_rmdir();
