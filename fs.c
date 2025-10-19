@@ -203,13 +203,14 @@ void freeBlock(int block_index) {
 }
 
 int allocateInode(void) {
-    for (uint32_t i = 0; i < MAX_INODES; i++){
+    for (uint32_t i = 0; i < MAX_INODES; i++) {
         uint32_t byte = i / 8;
         uint8_t bit = i % 8;
 
-        if ((inode_bitmap[byte] & (1 << bit)) == 0){
+        if ((inode_bitmap[byte] & (1 << bit)) == 0) {
             inode_bitmap[byte] |= (1 << bit);
             memset(&inode_table[i], 0, sizeof(inode_t));
+            inode_table[i].next_inode = 0;
             return i;
         }
     }
@@ -247,8 +248,8 @@ int writeBlock(uint32_t block_index, const void *buffer){
 }
 
 /* ---- diretórios ---- */
-int dirFindEntry(int dir_inode, const char *name, int *out_inode) {
-    if (dir_inode < 0 || dir_inode >= MAX_INODES || !name || !out_inode) 
+int dirFindEntry(int dir_inode, const char *name, inode_type_t type, int *out_inode) {
+    if (dir_inode < 0 || dir_inode >= MAX_INODES || !name|| !out_inode) 
         return -1;
 
     int current_inode = dir_inode;
@@ -264,7 +265,7 @@ int dirFindEntry(int dir_inode, const char *name, int *out_inode) {
             if (readBlock(dir->blocks[i], buffer) != 0) return -1;
 
             for (int j = 0; j < BLOCK_SIZE / sizeof(dir_entry_t); j++) {
-                if (buffer[j].inode_index != 0 && strcmp(buffer[j].name, name) == 0) {
+                if (buffer[j].inode_index != 0 && strcmp(buffer[j].name, name) == 0 && inode_table[buffer[j].inode_index].type == type) {
                     *out_inode = buffer[j].inode_index;
                     return 0;
                 }
@@ -278,56 +279,67 @@ int dirFindEntry(int dir_inode, const char *name, int *out_inode) {
     return -1;
 }
 
-int dirAddEntry(int dir_inode, const char *name, int inode_index){
-    if (dir_inode < 0 || dir_inode >= MAX_INODES || !name || inode_index < 0 || inode_index >= MAX_INODES) return -1;
+int dirAddEntry(int dir_inode, const char *name, inode_type_t type, int inode_index) {
+    if (dir_inode < 0 || dir_inode >= MAX_INODES || !name || !inode_index) return -1;
 
+    // evita duplicados
     int found;
-    if (dirFindEntry(dir_inode, name, &found) == 0) return -1; // já existe
+    if (dirFindEntry(dir_inode, name, type, &found) == 0) return -1;
 
     int current_inode = dir_inode;
+
     while (current_inode >= 0) {
         inode_t *dir = &inode_table[current_inode];
         if (dir->type != FILE_DIRECTORY) return -1;
 
-        // garante pelo menos um bloco alocado
-        if (dir->blocks[0] == 0) {
-            int new_block = allocateBlock();
-            if (new_block < 0) return -1;
-            dir->blocks[0] = new_block;
-            dir_entry_t empty_block[BLOCK_SIZE / sizeof(dir_entry_t)] = {0};
-            if (writeBlock(new_block, empty_block) != 0) return -1;
-        }
-
+        // tenta colocar em todos os blocos existentes
         for (int i = 0; i < BLOCKS_PER_INODE; i++) {
-            uint32_t block_index = dir->blocks[i];
-            if (block_index == 0) continue;
+            if (dir->blocks[i] == 0) {
+                // se bloco não existe, aloca
+                int new_block = allocateBlock();
+                if (new_block < 0) return -1;
+                dir->blocks[i] = new_block;
+                dir_entry_t empty[BLOCK_SIZE / sizeof(dir_entry_t)] = {0};
+                if (writeBlock(new_block, empty) != 0) return -1;
+            }
 
+            // tenta inserir neste bloco
             dir_entry_t buffer[BLOCK_SIZE / sizeof(dir_entry_t)];
-            if (readBlock(block_index, buffer) != 0) return -1;
+            if (readBlock(dir->blocks[i], buffer) != 0) return -1;
 
             for (int j = 0; j < BLOCK_SIZE / sizeof(dir_entry_t); j++) {
                 if (buffer[j].inode_index == 0) {
                     strncpy(buffer[j].name, name, sizeof(buffer[j].name)-1);
                     buffer[j].name[sizeof(buffer[j].name)-1] = '\0';
                     buffer[j].inode_index = inode_index;
-                    if (writeBlock(block_index, buffer) != 0) return -1;
 
-                    inode_table[dir_inode].size += sizeof(dir_entry_t);
-                    inode_table[dir_inode].modification_date = time(NULL);
+                    if (writeBlock(dir->blocks[i], buffer) != 0) return -1;
 
+                    dir->size += sizeof(dir_entry_t);
+                    dir->modification_date = time(NULL);
                     return 0;
                 }
             }
         }
 
-        // avança ou cria next_inode se necessário
+        // todos os blocos do inode cheio → cria next_inode
         if (dir->next_inode == 0) {
             int next = allocateInode();
             if (next < 0) return -1;
-            memset(&inode_table[next], 0, sizeof(inode_t));
+            inode_t *next_inode = &inode_table[next];
+            memset(next_inode, 0, sizeof(inode_t));
+            next_inode->type = FILE_DIRECTORY;
+
+            // aloca primeiro bloco do next_inode
+            int new_block = allocateBlock();
+            if (new_block < 0) return -1;
+            next_inode->blocks[0] = new_block;
+            dir_entry_t empty[BLOCK_SIZE / sizeof(dir_entry_t)] = {0};
+            if (writeBlock(new_block, empty) != 0) return -1;
+
             dir->next_inode = next;
-            inode_table[next].type = FILE_DIRECTORY;
         }
+
         current_inode = dir->next_inode;
     }
 
@@ -335,7 +347,8 @@ int dirAddEntry(int dir_inode, const char *name, int inode_index){
 }
 
 
-int dirRemoveEntry(int dir_inode, const char *name){
+
+int dirRemoveEntry(int dir_inode, const char *name, inode_type_t type){
     if (dir_inode < 0 || dir_inode >= MAX_INODES || !name) return -1;
 
     int current_inode = dir_inode;
@@ -382,7 +395,7 @@ int dirRemoveEntry(int dir_inode, const char *name){
 int createDirectory(int parent_inode, const char *name){
     if (parent_inode < 0|| !name) return -1;
     int dummy_output;
-    if (dirFindEntry(parent_inode, name, &dummy_output) == 0) return -1;
+    if (dirFindEntry(parent_inode, name, FILE_DIRECTORY, &dummy_output) == 0) return -1;
 
     int new_inode_index = allocateInode();
     if (new_inode_index < 0) return -1;
@@ -414,7 +427,7 @@ int createDirectory(int parent_inode, const char *name){
 
     if (writeBlock(block, entries) != 0) return -1;
     
-    if (dirAddEntry(parent_inode, name, new_inode_index) != 0) return -1;
+    if (dirAddEntry(parent_inode, name, FILE_DIRECTORY, new_inode_index) != 0) return -1;
     sync_fs();
     return 0;
 }
@@ -422,7 +435,7 @@ int createDirectory(int parent_inode, const char *name){
 int deleteDirectory(int parent_inode, const char *name){
     if (parent_inode < 0|| !name) return -1;
     int target_inode;
-    if (dirFindEntry(parent_inode, name, &target_inode) != 0) return -1;
+    if (dirFindEntry(parent_inode, name, FILE_DIRECTORY, &target_inode) != 0) return -1;
 
     inode_t *target = &inode_table[target_inode];
     if (target->type != FILE_DIRECTORY) return -1;
@@ -440,7 +453,7 @@ int deleteDirectory(int parent_inode, const char *name){
         }
     }
 
-    if (dirRemoveEntry(parent_inode, name) != 0) return -1;
+    if (dirRemoveEntry(parent_inode, name, FILE_DIRECTORY) != 0) return -1;
     freeInode(target_inode);
     sync_fs();
     return 0;
@@ -450,7 +463,7 @@ int deleteDirectory(int parent_inode, const char *name){
 int createFile(int parent_inode, const char *name){
     if (parent_inode < 0|| !name) return -1;
     int dummy_output;
-    if (dirFindEntry(parent_inode, name, &dummy_output) == 0) return -1;
+    if (dirFindEntry(parent_inode, name, FILE_REGULAR, &dummy_output) == 0) return -1;
 
     int new_inode_index = allocateInode();
     if (new_inode_index < 0) return -1;
@@ -468,7 +481,7 @@ int createFile(int parent_inode, const char *name){
     implementar creator, owner, permissions
     */
 
-    if (dirAddEntry(parent_inode, name, new_inode_index) != 0) return -1;
+    if (dirAddEntry(parent_inode, name, FILE_REGULAR, new_inode_index) != 0) return -1;
     sync_fs();
     return 0;
 }
@@ -476,7 +489,7 @@ int createFile(int parent_inode, const char *name){
 int deleteFile(int parent_inode, const char *name){
     if (parent_inode < 0|| !name) return -1;
     int target_inode;
-    if (dirFindEntry(parent_inode, name, &target_inode) == -1) return -1;
+    if (dirFindEntry(parent_inode, name, FILE_REGULAR, &target_inode) == -1) return -1;
 
     inode_t *target = &inode_table[target_inode];
     if (target->type != FILE_REGULAR) return -1;
@@ -486,7 +499,7 @@ int deleteFile(int parent_inode, const char *name){
             freeBlock(target->blocks[i]);
     }
 
-    if (dirRemoveEntry(parent_inode, name) == -1) return -1;
+    if (dirRemoveEntry(parent_inode, name, FILE_REGULAR) == -1) return -1;
     freeInode(target_inode);
     sync_fs();
     return 0;
@@ -562,5 +575,9 @@ fs_dir_list_t listElements(int parent_inode) {
     result.entries = temp;
     result.count = count;
     return result;
+}
+
+int addContentToFile(int parent_inode, const char *name, const char *content){
+    
 }
 

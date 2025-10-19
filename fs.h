@@ -79,9 +79,9 @@ int readBlock(uint32_t block_index, void *buffer);
 int writeBlock(uint32_t block_index, const void *buffer);
 
 
-int dirFindEntry(int dir_inode, const char *name, int *out_inode);
-int dirAddEntry(int dir_inode, const char *name, int inode_index);
-int dirRemoveEntry(int dir_inode, const char *name);
+int dirFindEntry(int dir_inode, const char *name, inode_type_t type,int *out_inode);
+int dirAddEntry(int dir_inode, const char *name, inode_type_t type,int inode_index);
+int dirRemoveEntry(int dir_inode, const char *name, inode_type_t type);
 
 /* Manipulação de conteudos */
 int createDirectory(int parent_inode, const char *name);

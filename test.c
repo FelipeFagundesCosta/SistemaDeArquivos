@@ -33,7 +33,7 @@ int main() {
 
     printf("=== Criando arquivos file1.txt e file2.txt em /dir1 ===\n");
     int dir1_inode;
-    if (dirFindEntry(ROOT_INODE, "dir1", &dir1_inode) != 0) {
+    if (dirFindEntry(ROOT_INODE, "dir1", FILE_DIRECTORY,&dir1_inode) != 0) {
         fprintf(stderr, "dir1 não encontrado\n");
         return 1;
     }
