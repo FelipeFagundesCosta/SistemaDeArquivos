@@ -842,3 +842,16 @@ int createSymlink(int parent_inode, int target_index, const char *link_name, ino
 }
 
 
+int cmd_mkdir(const char *path, const char *name, const char *user){
+    if (!path || !name || !user) return -1;
+
+    int parent;
+    if (resolvePath(path, &parent) != 0) return -1;
+
+    if (createDirectory(parent, name, user) != 0) return -1;
+    return 0;
+}
+
+
+
+
