@@ -53,14 +53,14 @@ int main() {
 
     // --- Testando resolvePath absoluto ---
     int inode_resolved;
-    if (resolvePath("~/a/b/c/d/bigfile.txt", &inode_resolved) > 0) {
+    if (resolvePath("~/a/b/c/d/bigfile.txt", &inode_resolved) == 0) {
         printf("resolvePath absoluto encontrou inode %d\n", inode_resolved);
     } else {
         printf("resolvePath absoluto falhou\n");
     }
 
     // --- Testando resolvePath relativo ---
-    if (resolvePath("c/d/bigfile.txt", &inode_resolved) > 0) {
+    if (resolvePath("c/d/bigfile.txt", &inode_resolved) == 0) {
         printf("resolvePath relativo encontrou inode %d\n", inode_resolved);
     } else {
         printf("resolvePath relativo falhou\n");
@@ -77,11 +77,11 @@ int main() {
     int bigfile_inode;
     dirFindEntry(inode_d, "bigfile.txt", FILE_REGULAR, &bigfile_inode);
 
-    if (createSymlink(inode_d, bigfile_inode, "link_to_bigfile", FILE_SYMLINK, user) == 0) {
+    if (createSymlink(inode_d, bigfile_inode, "link_to_bigfile", FILE_REGULAR, user) == 0) {
         printf("Symlink criado com sucesso!\n");
 
         int symlink_inode;
-        if (dirFindEntry(inode_d, "link_to_bigfile", FILE_SYMLINK, &symlink_inode) == 0) {
+        if (dirFindEntry(inode_d, "link_to_bigfile", FILE_REGULAR, &symlink_inode) == 0) {
             printf("Leitura via symlink: inode %d\n", symlink_inode);
 
             // Lendo conteúdo através do symlink

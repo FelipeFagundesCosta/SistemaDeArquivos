@@ -803,7 +803,7 @@ int resolvePath(const char *path, int *inode_out) {
     }
 
     *inode_out = current;
-    return 1; // sucesso
+    return 0; // sucesso
 }
 
 int createSymlink(int parent_inode, int target_index, const char *link_name, inode_type_t type, const char *user) {
