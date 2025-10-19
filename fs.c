@@ -432,6 +432,7 @@ int createDirectory(int parent_inode, const char *name, const char *user){
     strncpy(new_inode->owner, user, MAX_NAMESIZE-1);
     new_inode->owner[MAX_NAMESIZE-1] = '\0';
     new_inode->permissions = PERM_RWX << 6 | PERM_RX << 3 | PERM_RX;
+    new_inode->link_target_index = -1;
 
     int block = allocateBlock();
     if (block < 0) return -1;
@@ -510,6 +511,7 @@ int createFile(int parent_inode, const char *name, const char *user){
     strncpy(new_inode->owner, user, MAX_NAMESIZE-1);
     new_inode->owner[MAX_NAMESIZE-1] = '\0';
     new_inode->permissions = PERM_RWX << 6 | PERM_RX << 3 | PERM_RX;
+    new_inode->link_target_index = -1;
 
     if (dirAddEntry(parent_inode, name, FILE_REGULAR, new_inode_index) != 0) return -1;
     sync_fs();
@@ -615,6 +617,10 @@ int addContentToFile(int parent_inode, const char *name, const char *content, co
     int target_inode;
     if (dirFindEntry(parent_inode, name, FILE_REGULAR, &target_inode) != 0) return -1;
 
+    if (inode_table[target_inode].link_target_index != -1){
+        target_inode = inode_table[target_inode].link_target_index;
+    }
+
     inode_t *inode = &inode_table[target_inode];
     if (!hasPermission(inode, user, PERM_WRITE)) return -1;
     
@@ -702,6 +708,10 @@ int readContentFromFile(int parent_inode, const char *name, char *buffer, size_t
         return -1;
     }
 
+    if (inode_table[target_inode].link_target_index != -1){
+        target_inode = inode_table[target_inode].link_target_index;
+    }
+
     inode_t *inode = &inode_table[target_inode];
     if (!hasPermission(inode, user, PERM_READ)) return -1;
 
@@ -769,7 +779,7 @@ int resolvePath(const char *path, int *inode_out) {
             // sobe um nível
             if (current == ROOT_INODE) continue; // já está na raiz
             int parent_inode;
-            if (!dirFindEntry(current, "..", FILE_DIRECTORY, &parent_inode)) {
+            if (dirFindEntry(current, "..", FILE_DIRECTORY, &parent_inode) != 0) {
                 // falha ao encontrar o pai
                 return -1;
             }
@@ -783,10 +793,52 @@ int resolvePath(const char *path, int *inode_out) {
             // falha ao encontrar a entrada
             return -1;
         }
+        int depth = 0;
+        while (inode_table[next_inode].link_target_index != -1) {
+            next_inode = inode_table[next_inode].link_target_index;
+            if (++depth > 16) return -1; // evita loops
+        }
+
         current = next_inode;
     }
 
     *inode_out = current;
     return 1; // sucesso
 }
+
+int createSymlink(int parent_inode, int target_index, const char *link_name, inode_type_t type, const char *user) {
+    // 1. Verifica se link_name já existe
+    int dummy_output;
+    if (dirFindEntry(parent_inode, link_name, type, &dummy_output)) return -1; // erro, já existe
+
+    inode_t *parent = &inode_table[parent_inode];
+    if (!hasPermission(parent, user, PERM_WRITE)) return -1;
+
+    // 2. Aloca um novo i-node
+    int inode_index = allocateInode();
+    inode_t *inode = &inode_table[inode_index];
+    if (!inode) return -1;
+
+    // 3. Preenche campos
+    strncpy(inode->name, link_name, MAX_NAMESIZE-1);
+    inode->name[MAX_NAMESIZE-1] = '\0';
+    inode->type = type;
+    inode->size = 0;
+    inode->link_target_index = target_index;
+    inode->creation_date = time(NULL);
+    inode->modification_date = inode->creation_date;
+    strncpy(inode->creator, user, MAX_NAMESIZE-1);
+    inode->creator[MAX_NAMESIZE-1] = '\0';
+    strncpy(inode->owner, user, MAX_NAMESIZE-1);
+    inode->owner[MAX_NAMESIZE-1] = '\0';
+    inode->permissions = inode_table[target_index].permissions;
+
+    if (dirAddEntry(parent_inode, link_name, type, inode_index) != 0){
+        freeInode(inode_index);
+        return -1;
+    }
+
+    return 0;
+}
+
 

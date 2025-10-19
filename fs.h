@@ -22,7 +22,6 @@
 typedef enum {
     FILE_REGULAR,
     FILE_DIRECTORY,
-    FILE_SYMLINK,
     FILE_ANY
 } inode_type_t;
 typedef enum {
@@ -47,7 +46,8 @@ typedef struct {
     time_t modification_date;   
     permission_t permissions;
     uint32_t blocks[BLOCKS_PER_INODE];
-    uint32_t next_inode;     
+    uint32_t next_inode;
+    uint32_t link_target_index;     
 } inode_t;
 
 typedef struct {
@@ -107,6 +107,21 @@ ssize_t getFileSize(int parent_inode, const char *name);
 int readContentFromFile(int parent_inode, const char *name, char *buffer, size_t buffer_size, size_t *out_bytes, const char *user);
 
 int resolvePath(const char *path, int *inode_out);
+
+int createSymlink(int parent_inode, int target_index, const char *link_name, inode_type_t type, const char *user);
+
+int cmd_cd();
+int cmd_mkdir();
+int cmd_touch();
+int cmd_echo_arrow();
+int cmd_echo_arrow_arrow();
+int cmd_cat();
+int cmd_cp();
+int cmd_mv();
+int cmd_ln();
+int cmd_ls();
+int cmd_rm();
+int cmd_rmdir();
 
 /* Layout */
 size_t block_bitmap_bytes(void);
