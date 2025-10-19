@@ -841,4 +841,27 @@ int createSymlink(int parent_inode, int target_index, const char *link_name, ino
     return 0;
 }
 
+int cmd_cd();
+
+int cmd_mkdir(const char *path, const char *name, const char *user){
+    if (!path || !name) return -1;
+
+    int parent;
+    if (resolvePath(path, &parent) != 0) return -1;
+
+    if (createDirectory(parent, name, user) != 0) return -1;
+    return 0;
+}
+
+int cmd_touch();
+int cmd_echo_arrow();
+int cmd_echo_arrow_arrow();
+int cmd_cat();
+int cmd_cp();
+int cmd_mv();
+int cmd_ln();
+int cmd_ls();
+int cmd_rm();
+int cmd_rmdir();
+
 
