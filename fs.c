@@ -375,7 +375,7 @@ int dirAddEntry(int dir_inode, const char *name, inode_type_t type, int inode_in
         memset(empty, 0, BLOCK_SIZE);
 
         // tenta colocar em todos os blocos existentes
-        for (int i = 0; i < BLOCKS_PER_INODE; i++) {
+        for (int i = 2; i < BLOCKS_PER_INODE; i++) {
             if (dir->blocks[i] == 0) {
                 // se bloco não existe, aloca
                 int new_block = allocateBlock();
@@ -1155,26 +1155,66 @@ int cmd_ln_s(int current_inode, const char *target_path, const char *target_name
 }
 
 
-int cmd_ls(int current_inode, const char *path) {
-    if (strcmp(path, ".") == 0) {
-        inode_t inode = inode_table[current_inode];
-        while (1)
-        {   
-            for (int element = 0; element <= BLOCKS_PER_INODE; element++) {
-                printf("%s ", inode_table[inode.blocks[element]].name);
-                // if (inode.blocks[element] != 0) {
-                //     printf("%s  ", inode_table[inode.blocks[element]].name);
-                // }
-            }
-            uint32_t next = inode.next_inode;
-            if (next != 0) {
-                inode = inode_table[next];
-            }
-            else break;
+int cmd_ls(int current_inode, const char *path, const char *user) {
+    if (!user) return -1;
+
+    int target_inode = current_inode;
+    if (path && strlen(path) > 0) {
+        if (resolvePath(path, current_inode, &target_inode) != 0) {
+            printf("ls: caminho não encontrado: %s\n", path);
+            return -1;
         }
-        printf("\n");
     }
+
+    inode_t *dir_inode = &inode_table[target_inode];
+    if (dir_inode->type != FILE_DIRECTORY) {
+        printf("ls: não é um diretório: %s\n", path ? path : "(atual)");
+        return -1;
+    }
+
+    printf("Conteúdo de %s:\n", path && strlen(path) ? path : ".");
+    printf("-----------------------------------\n");
+
+    // percorre blocos do diretório
+    for (int i = 0; i < BLOCKS_PER_INODE; i++) {
+        if (dir_inode->blocks[i] == 0) continue;
+
+        dir_entry_t *entries = malloc(BLOCK_SIZE);
+        if (!entries) return -1;
+
+        if (readBlock(dir_inode->blocks[i], entries) != 0) {
+            free(entries);
+            return -1;
+        }
+
+        int entries_per_block = BLOCK_SIZE / sizeof(dir_entry_t);
+        for (int j = 0; j < entries_per_block; j++) {
+            if (entries[j].inode_index == 0)
+                continue;
+
+            inode_t *entry_inode = &inode_table[entries[j].inode_index];
+
+            char type_char;
+            switch (entry_inode->type) {
+                case FILE_DIRECTORY: type_char = 'd'; break;
+                case FILE_REGULAR:   type_char = '-'; break;
+                case FILE_SYMLINK:   type_char = 'l'; break;
+                default:             type_char = '?'; break;
+            }
+
+            printf("%c %-20s %8u bytes\n", 
+                   type_char, 
+                   entries[j].name, 
+                   entry_inode->size);
+        }
+
+        free(entries);
+    }
+
+    printf("-----------------------------------\n");
+    return 0;
 }
+
 
 int cmd_rm(int current_inode, const char *filepath, const char *user) {
     int inode_index;

@@ -80,7 +80,7 @@ int main() {
             cmd_cat(current_inode, arg1, user);
         }
         else if (strcmp(cmd, "ls") == 0) {
-            cmd_ls(current_inode, ".");
+            cmd_ls(current_inode, ".", user);
         }
         else if (strcmp(cmd, "cp") == 0 && arg1 && arg2 && arg3) {
             cmd_cp(current_inode, ".", arg1, ".", arg2, user);
