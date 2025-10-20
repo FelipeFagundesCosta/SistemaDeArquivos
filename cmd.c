@@ -59,6 +59,9 @@ int main() {
         else if (strcmp(cmd, "rm") == 0 && arg1) {
             cmd_rm(current_inode, arg1, user);
         }
+        else if (strcmp(cmd, "rmdir") == 0 && arg1) {
+            cmd_rmdir(current_inode, arg1, user);
+        }
         else if (strcmp(cmd, "echo") == 0 && arg1) {
             char *filename = arg1;
             char *redir = arg2; // > ou >>
@@ -80,7 +83,7 @@ int main() {
             cmd_cat(current_inode, arg1, user);
         }
         else if (strcmp(cmd, "ls") == 0) {
-            cmd_ls(current_inode, ".", user);
+            cmd_ls(current_inode, arg1? arg1 : ".", user);
         }
         else if (strcmp(cmd, "cp") == 0 && arg1 && arg2 && arg3) {
             cmd_cp(current_inode, ".", arg1, ".", arg2, user);

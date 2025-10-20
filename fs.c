@@ -1216,15 +1216,93 @@ int cmd_ls(int current_inode, const char *path, const char *user) {
     return 0;
 }
 
+int cmd_remove(int current_inode, const char *filepath, const char *user, int remove_dir) {
+    if (!filepath || !user) return -1;
 
-int cmd_rm(int current_inode, const char *filepath, const char *user) {
-    int inode_index;
-    if (resolvePath(filepath, current_inode, &inode_index) != 0) {
-        printf("Arquivo não encontrado\n");
+    // Suporte limitado ao tamanho do path
+    char path_copy[1024];
+    strncpy(path_copy, filepath, sizeof(path_copy) - 1);
+    path_copy[sizeof(path_copy) - 1] = '\0';
+    
+
+    char parent_path[1024];
+    char name[MAX_NAMESIZE];
+
+    // Encontra a última barra para separar caminho/nome
+    char *last_slash = strrchr(path_copy, '/');
+    if (!last_slash) {
+        // caso n tenha barra é o diretorio atual
+        strncpy(parent_path, ".", sizeof(parent_path) - 1);
+        parent_path[sizeof(parent_path) - 1] = '\0';
+        strncpy(name, path_copy, sizeof(name) - 1);
+        name[sizeof(name) - 1] = '\0';
+    } else {
+        // Extrai o nome apos a última barra
+        strncpy(name, last_slash + 1, sizeof(name) - 1);
+        name[sizeof(name) - 1] = '\0';
+
+        // Se a barra for a primeira posição, o pai é raiz "~"
+        if (last_slash == path_copy) {
+            strncpy(parent_path, "~", sizeof(parent_path) - 1);
+            parent_path[sizeof(parent_path) - 1] = '\0';
+        } else {
+            // Caso contrário copia a parte anterior como parent_path
+            size_t len = last_slash - path_copy;
+            if (len >= sizeof(parent_path)) return -1;
+            strncpy(parent_path, path_copy, len);
+            parent_path[len] = '\0';
+        }
+    }
+    
+    // resolve o inode do diretorio pai
+    int parent_inode;
+    if (resolvePath(parent_path, current_inode, &parent_inode) != 0) {
+        if (remove_dir)
+            printf("rmdir: diretório não encontrado: %s\n", parent_path);
+        else
+            printf("Arquivo não encontrado\n");
         return -1;
     }
-    printf("%d\n", inode_index);
-    inode_t inode = inode_table[inode_index];
-    deleteFile(inode_index, inode.name, user);
+
+    // Procura o arquivo com o nome dentro do diretório pai
+    int target_inode;
+    if (dirFindEntry(parent_inode, name, FILE_ANY, &target_inode) != 0) {
+        if (remove_dir)
+            printf("rmdir: não existe o diretório: %s\n", filepath);
+        else
+            printf("Arquivo não encontrado\n");
+        return -1;
+    }
+
+    inode_t *target = &inode_table[target_inode];
+
+    if (remove_dir) {
+        if (target->type != FILE_DIRECTORY) {
+            printf("rmdir: não é um diretório: %s\n", filepath);
+            return -1;
+        }
+        if (deleteDirectory(parent_inode, name, user) != 0) {
+            printf("rmdir: não foi possível remover '%s'\n", filepath);
+            return -1;
+        }
+        return 0;
+    } else {
+        if (target->type == FILE_DIRECTORY) {
+            printf("rm: não é possível remover '%s': é um diretório\n", filepath);
+            return -1;
+        }
+        if (deleteFile(parent_inode, name, user) != 0) {
+            printf("Erro ao remover arquivo: %s\n", filepath);
+            return -1;
+        }
+        return 0;
+    }
 }
 
+int cmd_rm(int current_inode, const char *filepath, const char *user) {
+    return cmd_remove(current_inode, filepath, user, 0);
+}
+
+int cmd_rmdir(int current_inode, const char *filepath, const char *user) {
+    return cmd_remove(current_inode, filepath, user, 1);
+}
