@@ -10,6 +10,7 @@ int main() {
     int current_inode = 0; // inode raiz
     char user[] = "root";  // usuário fixo para testes
     char input[MAX_INPUT];
+    char path[1024]; strcpy(path, "~");
 
     if (access(DISK_NAME, F_OK) == 0) {
     // Disco existe → montar
@@ -26,9 +27,10 @@ int main() {
     }
 
     printf("MiniFS Terminal. Digite 'exit' para sair.\n");
-
+    
     while (1) {
-        printf("[%s]> ", inode_table[current_inode].name); 
+        
+        printf("[%s]> ",   path); 
         if (!fgets(input, MAX_INPUT, stdin)) break;
 
         // Remove \n final
@@ -48,7 +50,7 @@ int main() {
         
 
         if (strcmp(cmd, "cd") == 0 && arg1) {
-            cmd_cd(&current_inode, arg1);
+            cmd_cd(&current_inode, arg1, path);
         }
         else if (strcmp(cmd, "mkdir") == 0 && arg1) {
             cmd_mkdir(current_inode, arg1, user);

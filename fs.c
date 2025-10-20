@@ -987,6 +987,139 @@ int resolvePath(const char *path, int current_inode, int *inode_out) {
     return 0;
 }
 
+int get_inode_path(int inode_index, char *out_buf, size_t buflen) {
+    if (!out_buf || buflen == 0) return -1;
+    if (inode_index < 0 || inode_index >= MAX_INODES) return -1;
+
+    // Root
+    if (inode_index == ROOT_INODE) {
+        strncpy(out_buf, "~", buflen);
+        out_buf[buflen - 1] = '\0';
+        return 0;
+    }
+
+    // Array temporário para armazenar componentes do caminho
+    const int MAX_PARTS = 512;
+    char *parts[MAX_PARTS];
+    int parts_count = 0;
+
+    int current = inode_index;
+
+    while (current != ROOT_INODE) {
+        int parent = -1;
+        char found_name[MAX_NAMESIZE] = {0};
+        int found = 0;
+
+        // Primeiro tente usar '..' se current for diretório (otimização)
+        if (inode_table[current].type == FILE_DIRECTORY) {
+            if (dirFindEntry(current, "..", FILE_DIRECTORY, &parent) == 0) {
+                // procurar no pai o nome que referencia 'current'
+                inode_t *pnode = &inode_table[parent];
+                for (int b = 0; b < BLOCKS_PER_INODE && !found; ++b) {
+                    uint32_t blk = pnode->blocks[b];
+                    if (blk == 0) continue;
+                    dir_entry_t *entries = malloc(BLOCK_SIZE);
+                    if (!entries) break;
+                    if (readBlock(blk, entries) == 0) {
+                        int n_entries = BLOCK_SIZE / sizeof(dir_entry_t);
+                        for (int e = 0; e < n_entries; ++e) {
+                            if (entries[e].inode_index == (uint32_t)current) {
+                                if (strcmp(entries[e].name, ".") != 0 && strcmp(entries[e].name, "..") != 0) {
+                                    strncpy(found_name, entries[e].name, sizeof(found_name)-1);
+                                    found = 1;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    free(entries);
+                }
+            }
+        }
+
+        // Se não achou via '..' (ou inode não é diretório), varre todo FS procurando o pai
+        if (!found) {
+            for (int i = 0; i < MAX_INODES && !found; ++i) {
+                if (inode_table[i].type != FILE_DIRECTORY) continue;
+                inode_t *pnode = &inode_table[i];
+                for (int b = 0; b < BLOCKS_PER_INODE && !found; ++b) {
+                    uint32_t blk = pnode->blocks[b];
+                    if (blk == 0) continue;
+                    dir_entry_t *entries = malloc(BLOCK_SIZE);
+                    if (!entries) break;
+                    if (readBlock(blk, entries) == 0) {
+                        int n_entries = BLOCK_SIZE / sizeof(dir_entry_t);
+                        for (int e = 0; e < n_entries; ++e) {
+                            if (entries[e].inode_index == (uint32_t)current &&
+                                strcmp(entries[e].name, ".") != 0 &&
+                                strcmp(entries[e].name, "..") != 0) {
+                                parent = i;
+                                strncpy(found_name, entries[e].name, sizeof(found_name)-1);
+                                found = 1;
+                                break;
+                            }
+                        }
+                    }
+                    free(entries);
+                }
+                if (found && parent == -1) {
+                    // no caso em que encontramos o nome mas não definimos parent (não deve ocorrer)
+                    parent = i;
+                }
+                if (found && parent == -1) parent = i;
+            }
+        }
+
+        if (!found) {
+            // não encontrou pai/entrada — limpa e retorna erro
+            for (int k = 0; k < parts_count; ++k) free(parts[k]);
+            return -1;
+        }
+
+        // guarda o componente
+        if (parts_count >= MAX_PARTS) {
+            for (int k = 0; k < parts_count; ++k) free(parts[k]);
+            return -1;
+        }
+        parts[parts_count++] = strdup(found_name);
+        if (!parts[parts_count-1]) {
+            for (int k = 0; k < parts_count-1; ++k) free(parts[k]);
+            return -1;
+        }
+
+        // atualiza current para o pai encontrado
+        if (parent == -1) {
+            // no caso em que usamos '..' para achar parent não preenchido acima,
+            // tentamos recuperar parent via dirFindEntry(current,"..")
+            if (dirFindEntry(current, "..", FILE_DIRECTORY, &parent) != 0) {
+                for (int k = 0; k < parts_count; ++k) free(parts[k]);
+                return -1;
+            }
+        }
+        current = parent;
+    }
+
+    // Monta a string final em out_buf: "~" + /part1/part2/...
+    size_t used = 0;
+    int n = snprintf(out_buf, buflen, "~");
+    if (n < 0) { for (int k = 0; k < parts_count; ++k) free(parts[k]); return -1; }
+    used = (size_t)n;
+    for (int i = parts_count - 1; i >= 0; --i) {
+        size_t need = strlen(parts[i]) + 1; // '/' + name
+        if (used + need + 1 > buflen) { // +1 para '\0'
+            for (int k = 0; k < parts_count; ++k) free(parts[k]);
+            return -1;
+        }
+        out_buf[used++] = '/';
+        strcpy(out_buf + used, parts[i]);
+        used += strlen(parts[i]);
+    }
+    out_buf[used] = '\0';
+
+    for (int k = 0; k < parts_count; ++k) free(parts[k]);
+    return 0;
+}
+
 
 int createSymlink(int parent_inode, int target_index, const char *link_name, const char *user) {
     // 1. Verifica se link_name já existe
@@ -1086,14 +1219,19 @@ int createDirectoriesRecursively(const char *path, int current_inode, const char
 /* ---- Comandos de FS ---- */
 
 // cd
-int cmd_cd(int *current_inode, const char *path) {
+int cmd_cd(int *current_inode, const char *path, char *path_content) {
     if (!current_inode || !path) return -1;
 
     int target_inode;
     if (resolvePath(path, *current_inode, &target_inode) != 0) return -1;
 
     inode_t *inode = &inode_table[target_inode];
+
     if (inode->type != FILE_DIRECTORY) return -1;
+        if (get_inode_path(target_inode, path_content, sizeof(path_content)) != 0) {
+        printf("cd: Error getting path\n");
+        return -1;
+    }
 
     *current_inode = target_inode;
     return 0;
@@ -1391,7 +1529,7 @@ int cmd_ln_s(int current_inode,
 int cmd_ls(int current_inode, const char *path, const char *user, int info_arg) {
     if (!user) return -1;
 
-    // checa se o caminho existe
+    // checa se o caminho existe e resolve o path
     int target_inode = current_inode;
     if (path && strlen(path) > 0) {
         if (resolvePath(path, current_inode, &target_inode) != 0) {
@@ -1401,6 +1539,9 @@ int cmd_ls(int current_inode, const char *path, const char *user, int info_arg) 
     }
     
     inode_t *dir_inode = &inode_table[target_inode];
+    char dirname[MAX_NAMESIZE];
+    strcpy(dirname, dir_inode->name);
+    printf("%s\n", dirname);
 
     // itera sobre cada next dentro do inode
     do {

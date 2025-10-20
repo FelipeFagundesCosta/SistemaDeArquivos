@@ -89,6 +89,13 @@ typedef struct {
     int count;
 } fs_dir_list_t;
 
+typedef struct 
+{
+    char *path[FILENAME_MAX];
+    int size;
+} path_parser_t;
+
+
 /* Funções principais */
 int init_fs(void);
 int mount_fs(void);
@@ -98,6 +105,7 @@ int unmount_fs(void);
 /* Utilitarios */
 const char *format_time(time_t t, char *buf, size_t buflen);
 int show_inode_info(int inode_index);
+int get_inode_path(int inode_index, char *out_buf, size_t buflen);
 
 /* Alocação */
 int allocateBlock(void);
@@ -134,7 +142,7 @@ static void splitPath(const char *full_path, char *dir_path, char *base_name);
 int createSymlink(int parent_inode, int target_index, const char *link_name, const char *user);
 
 // core utils
-int cmd_cd(int *current_inode, const char *path);
+int cmd_cd(int *current_inode, const char *path, char *path_content);
 int cmd_cat(int current_inode, const char *path, const char *user);
 int cmd_mkdir(int current_inode, const char *fullpath, const char *user);
 int cmd_touch(int current_inode, const char *fullpath, const char *user);

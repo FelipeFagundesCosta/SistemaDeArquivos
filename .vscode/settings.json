@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        ".fantomasignore": "ignore",
+        "*.rmd": "markdown",
+        "stdio.h": "c"
+    }
+}
