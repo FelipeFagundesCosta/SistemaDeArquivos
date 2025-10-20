@@ -1158,11 +1158,44 @@ int cmd_ln_s(int current_inode, const char *target_path, const char *target_name
 
 int cmd_ls(int current_inode, const char *path) {
     if (strcmp(path, ".") == 0) {
-        printf("ta vivo\n");
-        fs_dir_list_t list = listElements(current_inode);
-        // for (int element = 0; element <= list.count; element++) {
-        //     printf("%s\n", list.entries[element].name);
-        // }
+        inode_t inode = inode_table[current_inode];
+        while (1)
+        {   
+            for (int element = 0; element <= BLOCKS_PER_INODE; element++) {
+                switch (inode_table[inode.blocks[element]].type)
+                {
+                case FILE_DIRECTORY:
+                    printf("DIR:  %s ", inode_table[inode.blocks[element]].name);
+                    break;
+                case FILE_REGULAR:
+                    printf("FILE: %s ", inode_table[inode.blocks[element]].name);
+                    break;
+                default:
+                    break;
+                }
+                // if (inode.blocks[element] != 0) {
+                //     printf("%s  ", inode_table[inode.blocks[element]].name);
+                // }
+            }
+            uint32_t next = inode.next_inode;
+            if (next != 0) {
+                inode = inode_table[next];
+            }
+            else break;
+        }
+        printf("\n");
+    }
+}
+
+int cmd_rm(int current_inode, const char *filepath, int recursive, const char *user) {
+    if (recursive) {
+        return -1;
+    }
+    else {
+        int inode_index;
+        if (resolvePath(filepath, current_inode, &inode_index) != 0) return -1;
+        inode_t *inode = &inode_table[inode_index];
+        deleteFile(inode_index, inode->name, user);
     }
 }
 
