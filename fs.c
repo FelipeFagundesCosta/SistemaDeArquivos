@@ -327,7 +327,7 @@ int dirFindEntry(int dir_inode, const char *name, inode_type_t type, int *out_in
             for (int j = 0; j < entries; j++) {
                 if (buffer[j].inode_index != 0 &&
                     strcmp(buffer[j].name, name) == 0 &&
-                    (inode_table[buffer[j].inode_index].type == type || type == FILE_ANY)) {
+                    (inode_table[buffer[j].inode_index].type == type || type == FILE_ANY|| inode_table[buffer[j].inode_index].link_target_index != -1)) {
                     *out_inode = buffer[j].inode_index;
                     free(buffer);
                     return 0;
@@ -348,43 +348,72 @@ int dirFindEntry(int dir_inode, const char *name, inode_type_t type, int *out_in
 
 
 int dirAddEntry(int dir_inode, const char *name, inode_type_t type, int inode_index) {
-    if (dir_inode < 0 || dir_inode >= MAX_INODES || !name) return -1;
+    if (dir_inode < 0 || dir_inode >= MAX_INODES || !name)
+        return -1;
 
     // evita duplicados
     int found;
-    if (dirFindEntry(dir_inode, name, type, &found) == 0) return -1;
+    if (dirFindEntry(dir_inode, name, type, &found) == 0)
+        return -1;
 
     int current_inode = dir_inode;
 
     while (current_inode >= 0) {
         inode_t *dir = &inode_table[current_inode];
-        if (dir->type != FILE_DIRECTORY) return -1;
+        if (dir->type != FILE_DIRECTORY)
+            return -1;
+
+        // aloca buffers no heap
+        dir_entry_t *buffer = malloc(BLOCK_SIZE);
+        dir_entry_t *empty = malloc(BLOCK_SIZE);
+        if (!buffer || !empty) {
+            free(buffer);
+            free(empty);
+            return -1;
+        }
+        memset(empty, 0, BLOCK_SIZE);
 
         // tenta colocar em todos os blocos existentes
         for (int i = 0; i < BLOCKS_PER_INODE; i++) {
             if (dir->blocks[i] == 0) {
                 // se bloco não existe, aloca
                 int new_block = allocateBlock();
-                if (new_block < 0) return -1;
+                if (new_block < 0) {
+                    free(buffer);
+                    free(empty);
+                    return -1;
+                }
                 dir->blocks[i] = new_block;
-                dir_entry_t empty[BLOCK_SIZE / sizeof(dir_entry_t)] = {0};
-                if (writeBlock(new_block, empty) != 0) return -1;
+                if (writeBlock(new_block, empty) != 0) {
+                    free(buffer);
+                    free(empty);
+                    return -1;
+                }
             }
 
-            // tenta inserir neste bloco
-            dir_entry_t buffer[BLOCK_SIZE / sizeof(dir_entry_t)];
-            if (readBlock(dir->blocks[i], buffer) != 0) return -1;
+            if (readBlock(dir->blocks[i], buffer) != 0) {
+                free(buffer);
+                free(empty);
+                return -1;
+            }
 
             for (int j = 0; j < BLOCK_SIZE / sizeof(dir_entry_t); j++) {
                 if (buffer[j].inode_index == 0) {
-                    strncpy(buffer[j].name, name, sizeof(buffer[j].name)-1);
-                    buffer[j].name[sizeof(buffer[j].name)-1] = '\0';
+                    strncpy(buffer[j].name, name, sizeof(buffer[j].name) - 1);
+                    buffer[j].name[sizeof(buffer[j].name) - 1] = '\0';
                     buffer[j].inode_index = inode_index;
 
-                    if (writeBlock(dir->blocks[i], buffer) != 0) return -1;
+                    if (writeBlock(dir->blocks[i], buffer) != 0) {
+                        free(buffer);
+                        free(empty);
+                        return -1;
+                    }
 
                     dir->size += sizeof(dir_entry_t);
                     dir->modification_date = time(NULL);
+
+                    free(buffer);
+                    free(empty);
                     return 0;
                 }
             }
@@ -393,21 +422,35 @@ int dirAddEntry(int dir_inode, const char *name, inode_type_t type, int inode_in
         // todos os blocos do inode cheio → cria next_inode
         if (dir->next_inode == 0) {
             int next = allocateInode();
-            if (next < 0) return -1;
+            if (next < 0) {
+                free(buffer);
+                free(empty);
+                return -1;
+            }
+
             inode_t *next_inode = &inode_table[next];
             memset(next_inode, 0, sizeof(inode_t));
             next_inode->type = FILE_DIRECTORY;
 
-            // aloca primeiro bloco do next_inode
             int new_block = allocateBlock();
-            if (new_block < 0) return -1;
+            if (new_block < 0) {
+                free(buffer);
+                free(empty);
+                return -1;
+            }
+
             next_inode->blocks[0] = new_block;
-            dir_entry_t empty[BLOCK_SIZE / sizeof(dir_entry_t)] = {0};
-            if (writeBlock(new_block, empty) != 0) return -1;
+            if (writeBlock(new_block, empty) != 0) {
+                free(buffer);
+                free(empty);
+                return -1;
+            }
 
             dir->next_inode = next;
         }
 
+        free(buffer);
+        free(empty);
         current_inode = dir->next_inode;
     }
 
@@ -416,28 +459,47 @@ int dirAddEntry(int dir_inode, const char *name, inode_type_t type, int inode_in
 
 
 
-int dirRemoveEntry(int dir_inode, const char *name, inode_type_t type){
-    if (dir_inode < 0 || dir_inode >= MAX_INODES || !name) return -1;
+
+int dirRemoveEntry(int dir_inode, const char *name, inode_type_t type) {
+    if (dir_inode < 0 || dir_inode >= MAX_INODES || !name)
+        return -1;
 
     int current_inode = dir_inode;
+
     while (current_inode >= 0) {
         inode_t *dir = &inode_table[current_inode];
-        if (dir->type != FILE_DIRECTORY) return -1;
+        if (dir->type != FILE_DIRECTORY)
+            return -1;
+
+        // buffer dinâmico
+        dir_entry_t *buffer = malloc(BLOCK_SIZE);
+        if (!buffer)
+            return -1;
 
         for (int i = 0; i < BLOCKS_PER_INODE; i++) {
             uint32_t block_index = dir->blocks[i];
-            if (block_index == 0) continue;
+            if (block_index == 0)
+                continue;
 
-            dir_entry_t buffer[BLOCK_SIZE / sizeof(dir_entry_t)];
-            if (readBlock(block_index, buffer) != 0) return -1;
+            if (readBlock(block_index, buffer) != 0) {
+                free(buffer);
+                return -1;
+            }
 
             for (int j = 0; j < BLOCK_SIZE / sizeof(dir_entry_t); j++) {
                 if (buffer[j].inode_index != 0 && strcmp(buffer[j].name, name) == 0) {
                     int target_inode = buffer[j].inode_index;
+
+                    // limpa entrada
                     buffer[j].inode_index = 0;
                     buffer[j].name[0] = '\0';
-                    if (writeBlock(block_index, buffer) != 0) return -1;
 
+                    if (writeBlock(block_index, buffer) != 0) {
+                        free(buffer);
+                        return -1;
+                    }
+
+                    // limpa dados do inode alvo
                     inode_t *target = &inode_table[target_inode];
                     for (int k = 0; k < BLOCKS_PER_INODE; k++) {
                         if (target->blocks[k] != 0) {
@@ -450,15 +512,19 @@ int dirRemoveEntry(int dir_inode, const char *name, inode_type_t type){
                     inode_table[dir_inode].size -= sizeof(dir_entry_t);
                     inode_table[dir_inode].modification_date = time(NULL);
 
+                    free(buffer);
                     return 0;
                 }
             }
         }
 
+        free(buffer);
         current_inode = dir->next_inode;
     }
+
     return -1;
 }
+
 
 int hasPermission(const inode_t *inode, const char *username, permission_t perm) {
     if (strcmp(inode->owner, username) == 0) {
@@ -898,6 +964,7 @@ int createSymlink(int parent_inode, int target_index, const char *link_name, ino
         return -1;
     }
 
+    sync_inode(inode_index);
     return 0;
 }
 
