@@ -749,84 +749,66 @@ fs_dir_list_t listElements(int parent_inode) {
     return result;
 }
 
-int addContentToFile(int parent_inode, const char *name, const char *content, const char *user) {
-    if (!name || !content || parent_inode < 0 || parent_inode >= MAX_INODES) return -1;
+int addContentToInode(int inode_number, const char *data, size_t data_size, const char *user) {
+    if (!data || !user) return -1;
 
-    int target_inode;
-    if (dirFindEntry(parent_inode, name, FILE_REGULAR, &target_inode) != 0) return -1;
+    inode_t *inode = &inode_table[inode_number];
 
-    int depth = 0;
-    while (inode_table[target_inode].type == FILE_SYMLINK){
-        target_inode = inode_table[target_inode].link_target_index;
-        if (++depth > 16) return -1;
-    }
-
-    inode_t *inode = &inode_table[target_inode];
+    // Permissão de escrita
     if (!hasPermission(inode, user, PERM_WRITE)) return -1;
-    
 
-    inode_t *file_inode = &inode_table[target_inode];
-
-    // --- Liberar blocos antigos ---
-    int current_inode_idx = target_inode;
-    while (current_inode_idx != 0) {
-        inode_t *cur_inode = &inode_table[current_inode_idx];
-
-        for (int i = 0; i < BLOCKS_PER_INODE; i++) {
-            if (cur_inode->blocks[i] != 0) {
-                freeBlock(cur_inode->blocks[i]);
-                cur_inode->blocks[i] = 0;
-            }
-        }
-
-        int next = cur_inode->next_inode;
-        if (current_inode_idx != target_inode && next != 0) freeInode(current_inode_idx);
-        cur_inode->next_inode = 0;
-        current_inode_idx = next;
-    }
-
-    file_inode->size = 0;
-    file_inode->modification_date = time(NULL);
-
-    // --- Escrever novo conteúdo ---
-    size_t content_len = strlen(content);
+    size_t offset = inode->size; // onde começar a escrever
     size_t written = 0;
-    inode_t *cur_inode = file_inode;
+    inode_t *current = inode;
 
-    while (written < content_len) {
-        for (int i = 0; i < BLOCKS_PER_INODE && written < content_len; i++) {
-            if (cur_inode->blocks[i] == 0) {
-                int new_block = allocateBlock();
-                if (new_block < 0) return -1;
-                cur_inode->blocks[i] = new_block;
-            }
-
-            char buffer[BLOCK_SIZE] = {0};
-            size_t chunk_size = (content_len - written > BLOCK_SIZE) ? BLOCK_SIZE : (content_len - written);
-            memcpy(buffer, content + written, chunk_size);
-
-            if (writeBlock(cur_inode->blocks[i], buffer) != 0) return -1;
-            written += chunk_size;
-        }
-
-        // precisa de um novo inode?
-        if (written < content_len) {
-            int next_inode_idx = allocateInode();
-            if (next_inode_idx < 0) return -1;
-
-            inode_t *next_inode = &inode_table[next_inode_idx];
-            memset(next_inode, 0, sizeof(inode_t));
-            next_inode->type = FILE_REGULAR;
-
-            cur_inode->next_inode = next_inode_idx;
-            cur_inode = next_inode;
-        }
+    // Vai até o último inode encadeado
+    while (current->next_inode != 0) {
+        current = &inode_table[current->next_inode];
     }
 
-    file_inode->size = content_len;
-    file_inode->modification_date = time(NULL);
-    return sync_fs();
+    while (written < data_size) {
+        // Procura por um bloco vazio ou parcialmente usado
+        int block_idx = -1;
+        for (int i = 0; i < BLOCKS_PER_INODE; i++) {
+            if (current->blocks[i] == 0) {
+                block_idx = i;
+                break;
+            }
+        }
+
+        // Se não houver bloco disponível, criar novo inode
+        if (block_idx == -1) {
+            int new_inode = allocateInode();
+            if (new_inode < 0) return -1; // sem inodes disponíveis
+            current->next_inode = new_inode;
+            current = &inode_table[new_inode];
+            block_idx = 0;
+        }
+
+        // Aloca novo bloco se necessário
+        if (current->blocks[block_idx] == 0) {
+            int new_block = allocateBlock();
+            if (new_block <= 0) return -1; // sem blocos disponíveis
+            current->blocks[block_idx] = new_block;
+        }
+
+        // Escreve no bloco
+        char block_buffer[BLOCK_SIZE] = {0};
+        size_t to_write = BLOCK_SIZE;
+        if (data_size - written < to_write) to_write = data_size - written;
+
+        memcpy(block_buffer, data + written, to_write);
+        if (writeBlock(current->blocks[block_idx], block_buffer) != 0) return -1;
+
+        written += to_write;
+        offset += to_write;
+    }
+
+    inode->size = offset; // atualiza tamanho do arquivo
+    sync_fs();
+    return 0;
 }
+
 
 ssize_t getFileSize(int parent_inode, const char *name) {
     int file_inode_index;
@@ -839,32 +821,23 @@ ssize_t getFileSize(int parent_inode, const char *name) {
     return inode->size;
 }
 
-int readContentFromFile(int parent_inode, const char *name, char *buffer, size_t buffer_size, size_t *out_bytes, const char *user) {
-    if (!name || !buffer || !out_bytes) return -1;
+int readContentFromInode(int inode_number, char *buffer, size_t buffer_size, size_t *out_bytes, const char *user) {
+    if (!buffer || !out_bytes || !user) return -1;
 
-    int target_inode;
-    if (dirFindEntry(parent_inode, name, FILE_REGULAR, &target_inode) != 0) {
-        *out_bytes = 0;
-        return -1;
-    }
-
+    int target_inode = inode_number;
     int depth = 0;
-    while (inode_table[target_inode].type == FILE_SYMLINK){
-        target_inode = inode_table[target_inode].link_target_index;
-        if (++depth > 16) return -1;
-    }
 
+    // Segue links simbólicos, com limite de 16
+    while (inode_table[target_inode].type == FILE_SYMLINK) {
+        target_inode = inode_table[target_inode].link_target_index;
+        if (++depth > 16) return -1; // evita loop infinito
+    }
 
     inode_t *inode = &inode_table[target_inode];
-    if (!hasPermission(inode, user, PERM_READ)) return -1;
-
-    if (!inode) {
-        *out_bytes = 0;
-        return -1;
-    }
+    if (!inode || !hasPermission(inode, user, PERM_READ)) return -1;
 
     size_t total_size = inode->size;
-    if (buffer_size < total_size + 1) return -1;
+    if (buffer_size < total_size + 1) return -1; // espaço para '\0'
 
     size_t offset = 0;
     inode_t *current = inode;
@@ -881,7 +854,11 @@ int readContentFromFile(int parent_inode, const char *name, char *buffer, size_t
 
             memcpy(buffer + offset, block_buffer, to_copy);
             offset += to_copy;
+
+            if (offset >= total_size) break; // já leu todo o arquivo
         }
+
+        if (offset >= total_size) break;
 
         if (current->next_inode != 0) {
             current = &inode_table[current->next_inode];
@@ -890,8 +867,8 @@ int readContentFromFile(int parent_inode, const char *name, char *buffer, size_t
         }
     }
 
-    buffer[total_size] = '\0';
-    *out_bytes = total_size;
+    buffer[offset] = '\0';
+    *out_bytes = offset;
     return 0;
 }
 
@@ -1027,10 +1004,19 @@ int cmd_echo_arrow(int current_inode, const char *path, const char *name, const 
     int inode_index;
     if (dirFindEntry(parent_inode, name, FILE_REGULAR, &inode_index) != 0) {
         if (createFile(parent_inode, name, user) != 0) return -1;
+        if (dirFindEntry(parent_inode, name, FILE_REGULAR, &inode_index) != 0) return -1;
     }
 
-    return addContentToFile(parent_inode, name, content, user);
+    inode_t *inode = &inode_table[inode_index];
+
+    // Substitui o conteúdo: resetar inode
+    inode->size = 0;
+    for (int i = 0; i < BLOCKS_PER_INODE; i++) inode->blocks[i] = 0;
+    inode->next_inode = 0;
+
+    return addContentToInode(inode_index, content, strlen(content), user);
 }
+
 
 // echo >>
 int cmd_echo_arrow_arrow(int current_inode, const char *path, const char *name, const char *content, const char *user) {
@@ -1040,79 +1026,116 @@ int cmd_echo_arrow_arrow(int current_inode, const char *path, const char *name, 
     if (resolvePath(path, current_inode, &parent_inode) != 0) return -1;
 
     int inode_index;
-    size_t current_size = 0;
-
     if (dirFindEntry(parent_inode, name, FILE_REGULAR, &inode_index) != 0) {
         if (createFile(parent_inode, name, user) != 0) return -1;
-        inode_index = -1;
+        if (dirFindEntry(parent_inode, name, FILE_REGULAR, &inode_index) != 0) return -1;
     }
 
-    inode_t *inode = (inode_index >= 0) ? &inode_table[inode_index] : NULL;
-    if (inode) current_size = inode->size;
+    return addContentToInode(inode_index, content, strlen(content), user);
+}
 
-    size_t content_size = strlen(content);
-    size_t buffer_size = current_size + content_size + 1;
-    char *buffer = malloc(buffer_size);
+
+int cmd_cat(int current_inode, const char *path, const char *user) {
+    if (!path || !user) return -1;
+
+    int target_inode;
+    if (resolvePath(path, current_inode, &target_inode) != 0)
+        return -1;
+
+    inode_t *inode = &inode_table[target_inode];
+    if (!inode || inode->type != FILE_REGULAR) {
+        fprintf(stderr, "Erro: %s não é um arquivo regular.\n", path);
+        return -1;
+    }
+
+    if (!hasPermission(inode, user, PERM_READ)) {
+        fprintf(stderr, "Erro: permissão negada para %s.\n", path);
+        return -1;
+    }
+
+    size_t filesize = inode->size;
+    if (filesize == 0) return 0; // arquivo vazio
+
+    char *buffer = malloc(filesize + 1);
     if (!buffer) return -1;
 
     size_t bytes_read = 0;
-    if (inode && readContentFromFile(parent_inode, name, buffer, buffer_size, &bytes_read, user) != 0) {
+    if (readContentFromInode(target_inode, buffer, filesize + 1, &bytes_read, user) != 0) {
         free(buffer);
         return -1;
     }
 
-    memcpy(buffer + bytes_read, content, content_size);
-    buffer[bytes_read + content_size] = '\0';
+    buffer[bytes_read] = '\0';
+    printf("%s\n", buffer);
 
-    int res = addContentToFile(parent_inode, name, buffer, user);
     free(buffer);
-    return res;
+    return 0;
 }
+
+
+
 
 // cp (copy)
 int cmd_cp(int current_inode, const char *src_path, const char *src_name,
            const char *dst_path, const char *dst_name, const char *user) {
     if (!src_path || !src_name || !dst_path || !dst_name || !user) return -1;
 
-    int src_inode;
-    if (resolvePath(src_path, current_inode, &src_inode) != 0) return -1;
+    // Resolve diretórios de origem e destino
+    int src_parent_inode;
+    if (resolvePath(src_path, current_inode, &src_parent_inode) != 0) return -1;
 
-    int file_inode;
-    if (dirFindEntry(src_inode, src_name, FILE_REGULAR, &file_inode) != 0) return -1;
+    int dst_parent_inode;
+    if (resolvePath(dst_path, current_inode, &dst_parent_inode) != 0) return -1;
 
-    int dst_inode;
-    if (resolvePath(dst_path, current_inode, &dst_inode) != 0) return -1;
+    // Encontra inode do arquivo de origem
+    int src_file_inode;
+    if (dirFindEntry(src_parent_inode, src_name, FILE_REGULAR, &src_file_inode) != 0) return -1;
 
-    inode_t *inode = &inode_table[file_inode];
-    char *buffer = malloc(inode->size + 1);
+    inode_t *src_inode = &inode_table[src_file_inode];
+
+    // Lê conteúdo direto do inode de origem
+    char *buffer = malloc(src_inode->size + 1);
     if (!buffer) return -1;
 
     size_t bytes_read;
-    if (readContentFromFile(src_inode, src_name, buffer, inode->size + 1, &bytes_read, user) != 0) {
+    if (readContentFromInode(src_file_inode, buffer, src_inode->size + 1, &bytes_read, user) != 0) {
         free(buffer);
         return -1;
     }
 
-    if (createFile(dst_inode, dst_name, user) != 0) {
-        free(buffer);
-        return -1;
+    // Cria arquivo de destino se não existir
+    int dst_file_inode;
+    if (dirFindEntry(dst_parent_inode, dst_name, FILE_REGULAR, &dst_file_inode) != 0) {
+        if (createFile(dst_parent_inode, dst_name, user) != 0) {
+            free(buffer);
+            return -1;
+        }
+        if (dirFindEntry(dst_parent_inode, dst_name, FILE_REGULAR, &dst_file_inode) != 0) {
+            free(buffer);
+            return -1;
+        }
     }
 
-    int result = addContentToFile(dst_inode, dst_name, buffer, user);
+    // Adiciona conteúdo ao inode de destino
+    int result = addContentToInode(dst_file_inode, buffer, bytes_read, user);
     free(buffer);
     return result;
 }
 
+
 // mv (move)
 int cmd_mv(int current_inode, const char *src_path, const char *src_name,
            const char *dst_path, const char *dst_name, const char *user) {
+    // Copia o arquivo
     if (cmd_cp(current_inode, src_path, src_name, dst_path, dst_name, user) != 0) return -1;
 
-    int src_inode;
-    if (resolvePath(src_path, current_inode, &src_inode) != 0) return -1;
+    // Apaga o arquivo de origem
+    int src_parent_inode;
+    if (resolvePath(src_path, current_inode, &src_parent_inode) != 0) return -1;
 
-    return deleteFile(src_inode, src_name, user);
+    return deleteFile(src_parent_inode, src_name, user);
 }
+
 
 // ln -s (symlink)
 int cmd_ln_s(int current_inode, const char *target_path, const char *target_name,

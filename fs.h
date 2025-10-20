@@ -119,9 +119,9 @@ int deleteDirectory(int parent_inode, const char *name, const char *user);
 int createFile(int parent_inode, const char *name, const char *user);
 int deleteFile(int parent_inode, const char *name, const char *user);
 fs_dir_list_t listElements(int parent_inode);
-int addContentToFile(int parent_inode, const char *name, const char *content, const char *user);
+int addContentToInode(int inode_number, const char *data, size_t data_size, const char *user);
 ssize_t getFileSize(int parent_inode, const char *name);
-int readContentFromFile(int parent_inode, const char *name, char *buffer, size_t buffer_size, size_t *out_bytes, const char *user);
+int readContentFromInode(int inode_number, char *buffer, size_t buffer_size, size_t *out_bytes, const char *user);
 
 int resolvePath(const char *path, int current_inode, int *inode_out);
 

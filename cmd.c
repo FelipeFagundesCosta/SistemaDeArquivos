@@ -45,6 +45,7 @@ int main() {
         char *arg4 = strtok(NULL, " ");
 
         if (!cmd) continue;
+        
 
         if (strcmp(cmd, "cd") == 0 && arg1) {
             cmd_cd(&current_inode, arg1);
@@ -56,9 +57,9 @@ int main() {
             cmd_touch(current_inode, ".", arg1, user);
         }
         else if (strcmp(cmd, "echo") == 0 && arg1) {
+            char *filename = arg1;
             char *redir = arg2; // > ou >>
-            char *filename = arg3;
-            char *content = arg4;
+            char *content = arg3;
 
             if (redir && filename && content) {
                 if (strcmp(redir, ">") == 0) {
@@ -70,14 +71,18 @@ int main() {
             } else {
                 printf("Uso: echo >|>> arquivo conteudo\n");
             }
+            
+        }
+        else if (strcmp(cmd, "cat") == 0 && arg1) {
+            cmd_cat(current_inode, arg1, user);
         }
         else if (strcmp(cmd, "ls") == 0) {
             cmd_ls(current_inode, ".");
         }
-        else if (strcmp(cmd, "cp") == 0 && arg1 && arg2 && arg3) {
+        else if (strcmp(cmd, "cp") == 0 && arg1 && arg2) {
             cmd_cp(current_inode, ".", arg1, ".", arg2, user);
         }
-        else if (strcmp(cmd, "mv") == 0 && arg1 && arg2 && arg3) {
+        else if (strcmp(cmd, "mv") == 0 && arg1 && arg2) {
             cmd_mv(current_inode, ".", arg1, ".", arg2, user);
         }
         else if (strcmp(cmd, "ln") == 0 && arg1 && strcmp(arg1, "-s") == 0 && arg2 && arg3) {
