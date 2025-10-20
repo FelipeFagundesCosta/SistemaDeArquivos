@@ -1228,15 +1228,14 @@ int cmd_cd(int *current_inode, const char *path, char *path_content) {
     inode_t *inode = &inode_table[target_inode];
 
     if (inode->type != FILE_DIRECTORY) return -1;
-        if (get_inode_path(target_inode, path_content, sizeof(path_content)) != 0) {
-        printf("cd: Error getting path\n");
-        return -1;
+    if (get_inode_path(target_inode, path_content, sizeof(path_content)) != 0) {
+        path_content = realloc(path_content, sizeof(path_content) * 2);
+        get_inode_path(target_inode, path_content, sizeof(path_content));
     }
 
     *current_inode = target_inode;
     return 0;
 }
-
 // Função auxiliar para separar caminho e último segmento
 static void splitPath(const char *full_path, char *dir_path, char *base_name) {
     const char *last_slash = strrchr(full_path, '/');
