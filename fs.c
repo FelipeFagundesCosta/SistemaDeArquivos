@@ -326,8 +326,7 @@ int dirFindEntry(int dir_inode, const char *name, inode_type_t type, int *out_in
 
             int entries = BLOCK_SIZE / sizeof(dir_entry_t);
             for (int j = 0; j < entries; j++) {
-                if (buffer[j].inode_index != 0 &&
-                    strcmp(buffer[j].name, name) == 0 &&
+                if (strcmp(buffer[j].name, name) == 0 &&
                     (inode_table[buffer[j].inode_index].type == type || type == FILE_SYMLINK || type == FILE_ANY)) {
                         
                     *out_inode = buffer[j].inode_index;
