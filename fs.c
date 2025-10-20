@@ -1162,17 +1162,7 @@ int cmd_ls(int current_inode, const char *path) {
         while (1)
         {   
             for (int element = 0; element <= BLOCKS_PER_INODE; element++) {
-                switch (inode_table[inode.blocks[element]].type)
-                {
-                case FILE_DIRECTORY:
-                    printf("DIR:  %s ", inode_table[inode.blocks[element]].name);
-                    break;
-                case FILE_REGULAR:
-                    printf("FILE: %s ", inode_table[inode.blocks[element]].name);
-                    break;
-                default:
-                    break;
-                }
+                printf("%s ", inode_table[inode.blocks[element]].name);
                 // if (inode.blocks[element] != 0) {
                 //     printf("%s  ", inode_table[inode.blocks[element]].name);
                 // }
@@ -1187,15 +1177,14 @@ int cmd_ls(int current_inode, const char *path) {
     }
 }
 
-int cmd_rm(int current_inode, const char *filepath, int recursive, const char *user) {
-    if (recursive) {
+int cmd_rm(int current_inode, const char *filepath, const char *user) {
+    int inode_index;
+    if (resolvePath(filepath, current_inode, &inode_index) != 0) {
+        printf("Arquivo não encontrado\n");
         return -1;
     }
-    else {
-        int inode_index;
-        if (resolvePath(filepath, current_inode, &inode_index) != 0) return -1;
-        inode_t *inode = &inode_table[inode_index];
-        deleteFile(inode_index, inode->name, user);
-    }
+    printf("%d\n", inode_index);
+    inode_t inode = inode_table[inode_index];
+    deleteFile(inode_index, inode.name, user);
 }
 

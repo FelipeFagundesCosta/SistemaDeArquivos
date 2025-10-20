@@ -56,6 +56,9 @@ int main() {
         else if (strcmp(cmd, "touch") == 0 && arg1) {
             cmd_touch(current_inode, ".", arg1, user);
         }
+        else if (strcmp(cmd, "rm") == 0 && arg1) {
+            cmd_rm(current_inode, arg1, user);
+        }
         else if (strcmp(cmd, "echo") == 0 && arg1) {
             char *filename = arg1;
             char *redir = arg2; // > ou >>
@@ -78,14 +81,6 @@ int main() {
         }
         else if (strcmp(cmd, "ls") == 0) {
             cmd_ls(current_inode, ".");
-        }
-        else if (strcmp(cmd, "rm") == 0 && arg1) {
-            if (arg1 == "-r" && arg2) {
-                cmd_rm(current_inode, arg2, 1, user);
-            } 
-            else {
-                cmd_rm(current_inode, arg1, 0, user);
-            }
         }
         else if (strcmp(cmd, "cp") == 0 && arg1 && arg2 && arg3) {
             cmd_cp(current_inode, ".", arg1, ".", arg2, user);
