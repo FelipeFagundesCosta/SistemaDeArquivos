@@ -7,18 +7,19 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <time.h>
+#include <stdlib.h>
 
-/* Globais */
+/* ---- Variáveis globais ---- */
 unsigned char *block_bitmap = NULL;
 unsigned char *inode_bitmap = NULL;
 inode_t *inode_table = NULL;
 FILE *disk = NULL;
 
-/* Layout computado */
-static off_t off_block_bitmap = 0;
-static off_t off_inode_bitmap = 0;
-static off_t off_inode_table = 0;
-static off_t off_data_region = 0;
+/* Layout do FS */
+off_t off_block_bitmap = 0;
+off_t off_inode_bitmap = 0;
+off_t off_inode_table = 0;
+off_t off_data_region = 0;
 
 size_t computed_block_bitmap_bytes = 0;
 size_t computed_inode_bitmap_bytes = 0;
@@ -26,162 +27,206 @@ size_t computed_inode_table_bytes = 0;
 uint32_t computed_meta_blocks = 0;
 uint32_t computed_data_blocks = 0;
 
-/* ---- utilitárias ---- */
+/* ---- Funções utilitárias ---- */
 size_t inode_bitmap_bytes(void) { return (MAX_INODES + 7) / 8; }
 size_t inode_table_bytes(void) { return MAX_INODES * sizeof(inode_t); }
 size_t block_bitmap_bytes(void) { return computed_block_bitmap_bytes; }
-size_t meta_region_bytes(void) { return computed_block_bitmap_bytes + computed_inode_bitmap_bytes + computed_inode_table_bytes; }
-off_t offset_block_bitmap(void) { return off_block_bitmap; }
-off_t offset_inode_bitmap(void) { return off_inode_bitmap; }
-off_t offset_inode_table(void) { return off_inode_table; }
-off_t offset_data_region(void) { return off_data_region; }
 
-/* ---- calcula layout ---- */
-static int compute_layout(void) {
+/* ---- Calcula layout do FS ---- */
+static void compute_layout(void) {
     size_t inode_bmap_bytes = inode_bitmap_bytes();
     size_t inode_tbl_bytes = inode_table_bytes();
 
-    size_t bmap_bytes = 0;
-    uint32_t meta_blocks = 0;
+    /* Primeiro assumimos todos os blocos de dados disponíveis */
+    size_t data_blocks = MAX_BLOCKS;
 
-    size_t inode_meta_bytes = inode_bmap_bytes + inode_tbl_bytes;
-    meta_blocks = (((MAX_BLOCKS + 7)/8 + inode_meta_bytes + BLOCK_SIZE - 1) / BLOCK_SIZE);
+    /* Calcula bytes do bitmap de blocos */
+    size_t bmap_bytes = (data_blocks + 7) / 8;
 
-    uint32_t data_blocks = MAX_BLOCKS - meta_blocks;
-    bmap_bytes = (data_blocks + 7) / 8;
-
-    meta_blocks = (bmap_bytes + inode_meta_bytes + BLOCK_SIZE - 1) / BLOCK_SIZE;
-
+    /* Computa tamanhos */
     computed_block_bitmap_bytes = bmap_bytes;
     computed_inode_bitmap_bytes = inode_bmap_bytes;
     computed_inode_table_bytes = inode_tbl_bytes;
-    computed_meta_blocks = meta_blocks;
+
+    /* Número de blocos ocupados pela meta-região */
+    computed_meta_blocks = (computed_block_bitmap_bytes +
+                            computed_inode_bitmap_bytes +
+                            computed_inode_table_bytes + BLOCK_SIZE - 1) / BLOCK_SIZE;
+
+    /* Blocos de dados efetivos */
     computed_data_blocks = MAX_BLOCKS - computed_meta_blocks;
 
-    off_block_bitmap = 0;
+    /* Offsets */
+    off_block_bitmap = sizeof(fs_header_t);
     off_inode_bitmap = off_block_bitmap + computed_block_bitmap_bytes;
     off_inode_table = off_inode_bitmap + computed_inode_bitmap_bytes;
     off_data_region = off_inode_table + computed_inode_table_bytes;
-
-    return 0;
+    off_data_region = ((off_data_region + BLOCK_SIZE - 1) / BLOCK_SIZE) * BLOCK_SIZE;
 }
 
-/* ---- init_fs ---- */
+/* ---- Persiste um inode específico no disco ---- */
+void sync_inode(int inode_num) {
+    if (!disk || !inode_table) return;
+    fseek(disk, off_inode_table + inode_num * sizeof(inode_t), SEEK_SET);
+    fwrite(&inode_table[inode_num], sizeof(inode_t), 1, disk);
+    fflush(disk);
+}
+
+/* ---- Inicializa um novo filesystem ---- */
 int init_fs(void) {
-    disk = fopen(DISK_NAME, "wb+");
-    if (!disk) { perror("init_fs"); return -1; }
-    if (ftruncate(fileno(disk), DISK_SIZE_MB * 1024 * 1024) != 0) {
-        perror("init_fs: ftruncate"); fclose(disk); disk=NULL; return -1;
+    if (access(DISK_NAME, F_OK) == 0) {
+        printf("[INFO] Disco existente detectado. Montando FS...\n");
+        return mount_fs();
     }
 
-    if (compute_layout() != 0) { fclose(disk); disk=NULL; return -1; }
+    printf("[INFO] Inicializando novo filesystem...\n");
+    disk = fopen(DISK_NAME, "wb+");
+    if (!disk) { perror("Erro ao criar disco"); return -1; }
+
+    ftruncate(fileno(disk), DISK_SIZE_MB * 1024 * 1024);
+    compute_layout();
 
     block_bitmap = calloc(1, computed_block_bitmap_bytes);
     inode_bitmap = calloc(1, computed_inode_bitmap_bytes);
-    inode_table = calloc(1, computed_inode_table_bytes);
-    if (!block_bitmap || !inode_bitmap || !inode_table) goto fail_init;
-
-    if (fwrite(block_bitmap, 1, computed_block_bitmap_bytes, disk) != computed_block_bitmap_bytes) goto fail_init;
-    if (fwrite(inode_bitmap, 1, computed_inode_bitmap_bytes, disk) != computed_inode_bitmap_bytes) goto fail_init;
-    if (fwrite(inode_table, 1, computed_inode_table_bytes, disk) != computed_inode_table_bytes) goto fail_init;
-
-    fflush(disk);
-    fsync(fileno(disk));
-    rewind(disk);
-
-    // === Criação do diretório raiz (inode 0) ===
-    int root_inode = allocateInode();
-    if (root_inode != ROOT_INODE) {
-        fprintf(stderr, "Erro: inode raiz não está em 0!\n");
-        goto fail_init;
+    inode_table = calloc(MAX_INODES, sizeof(inode_t));
+    if (!block_bitmap || !inode_bitmap || !inode_table) {
+        perror("Erro ao alocar memória para FS");
+        fclose(disk);
+        return -1;
     }
 
-    inode_t *root = &inode_table[ROOT_INODE];
-    time_t now = time(NULL);
+    /* Cria diretório raiz */
+    int root_inode = allocateInode();
+    inode_table[root_inode].type = FILE_DIRECTORY;
+    inode_table[root_inode].size = 0;
+    inode_table[root_inode].creation_date = time(NULL);
+    inode_table[root_inode].modification_date = time(NULL);
+    strcpy(inode_table[root_inode].name, "/");
+    strcpy(inode_table[root_inode].owner, "root");
+    inode_table[root_inode].blocks[0] = allocateBlock();
+    sync_inode(root_inode);
 
-    root->type = FILE_DIRECTORY;
-    strcpy(root->name, "~");
-    strcpy(root->creator, "root");
-    strcpy(root->owner, "root");
-    root->creation_date = now;
-    root->modification_date = now;
-    root->size = 0;
-    root->permissions = PERM_ALL;
+    /* Escreve header no disco */
+    fs_header_t header = {0};
+    header.magic = FS_MAGIC;
+    header.block_bitmap_bytes = computed_block_bitmap_bytes;
+    header.inode_bitmap_bytes = computed_inode_bitmap_bytes;
+    header.inode_table_bytes = computed_inode_table_bytes;
+    header.meta_blocks = computed_meta_blocks;
+    header.data_blocks = computed_data_blocks;
+    header.off_block_bitmap = off_block_bitmap;
+    header.off_inode_bitmap = off_inode_bitmap;
+    header.off_inode_table = off_inode_table;
+    header.off_data_region = off_data_region;
 
-    int block = allocateBlock();
-    if (block < 0) goto fail_init;
-    root->blocks[0] = block;
+    fseek(disk, 0, SEEK_SET);
+    fwrite(&header, sizeof(header), 1, disk);
+    fflush(disk);
 
-    dir_entry_t entries[BLOCK_SIZE / sizeof(dir_entry_t)] = {0};
+    /* Escreve bitmaps e tabela de inodes */
+    // bitmap de blocos
+    fseek(disk, off_block_bitmap, SEEK_SET);
+    fwrite(block_bitmap, 1, computed_block_bitmap_bytes, disk);
 
-    // "." aponta para si mesmo, ".." também (pois root não tem pai)
-    strcpy(entries[0].name, ".");
-    entries[0].inode_index = ROOT_INODE;
-    strcpy(entries[1].name, "..");
-    entries[1].inode_index = ROOT_INODE;
+    // bitmap de inodes
+    fseek(disk, off_inode_bitmap, SEEK_SET);
+    fwrite(inode_bitmap, 1, computed_inode_bitmap_bytes, disk);
 
-    if (writeBlock(block, entries) != 0) goto fail_init;
+    // tabela de inodes
+    fseek(disk, off_inode_table, SEEK_SET);
+    fwrite(inode_table, 1, computed_inode_table_bytes, disk);
 
-    sync_fs();
-    rewind(disk);
-
+    printf("[INFO] Filesystem criado com sucesso.\n");
     return 0;
-
-fail_init:
-    free(block_bitmap); free(inode_bitmap); free(inode_table);
-    fclose(disk); disk=NULL;
-    return -1;
 }
 
-/* ---- mount_fs ---- */
+/* ---- Monta filesystem existente ---- */
 int mount_fs(void) {
-    if (disk != NULL) return 0;
-
+    printf("[INFO] Montando filesystem existente...\n");
     disk = fopen(DISK_NAME, "rb+");
-    if (!disk) return init_fs();
+    if (!disk) { perror("Erro ao abrir disco"); return -1; }
 
-    if (compute_layout() != 0) { fclose(disk); disk=NULL; return -1; }
+    fs_header_t header;
+    fseek(disk, 0, SEEK_SET);
+    if (fread(&header, sizeof(header), 1, disk) != 1) {
+        fprintf(stderr, "Erro ao ler header do FS.\n");
+        fclose(disk);
+        return -1;
+    }
 
+    if (header.magic != FS_MAGIC) {
+        fprintf(stderr, "Disco inválido ou corrompido.\n");
+        fclose(disk);
+        return -1;
+    }
+
+    /* Restaura variáveis globais */
+    computed_block_bitmap_bytes = header.block_bitmap_bytes;
+    computed_inode_bitmap_bytes = header.inode_bitmap_bytes;
+    computed_inode_table_bytes = header.inode_table_bytes;
+    computed_meta_blocks = header.meta_blocks;
+    computed_data_blocks = header.data_blocks;
+    off_block_bitmap = header.off_block_bitmap;
+    off_inode_bitmap = header.off_inode_bitmap;
+    off_inode_table = header.off_inode_table;
+    off_data_region = header.off_data_region;
+
+    /* Aloca memória */
     block_bitmap = malloc(computed_block_bitmap_bytes);
     inode_bitmap = malloc(computed_inode_bitmap_bytes);
     inode_table = malloc(computed_inode_table_bytes);
-    if (!block_bitmap || !inode_bitmap || !inode_table) goto fail_mount;
+    if (!block_bitmap || !inode_bitmap || !inode_table) {
+        perror("Erro ao alocar memória para FS");
+        fclose(disk);
+        return -1;
+    }
 
+    /* Lê conteúdo do disco */
+    // bitmap de blocos
     fseek(disk, off_block_bitmap, SEEK_SET);
     fread(block_bitmap, 1, computed_block_bitmap_bytes, disk);
-    fread(inode_bitmap, 1, computed_inode_bitmap_bytes, disk);
-    fread(inode_table, 1, computed_inode_table_bytes, disk);
-    rewind(disk);
-    return 0;
 
-fail_mount:
-    free(block_bitmap); free(inode_bitmap); free(inode_table);
-    fclose(disk); disk=NULL;
-    return -1;
+    // bitmap de inodes
+    fseek(disk, off_inode_bitmap, SEEK_SET);
+    fread(inode_bitmap, 1, computed_inode_bitmap_bytes, disk);
+
+    // tabela de inodes
+    fseek(disk, off_inode_table, SEEK_SET);
+    fread(inode_table, 1, computed_inode_table_bytes, disk);
+
+
+    printf("[INFO] Filesystem montado com sucesso!\n");
+    return 0;
 }
 
-/* ---- sync_fs ---- */
+/* ---- Sincroniza FS inteiro ---- */
 int sync_fs(void) {
     if (!disk || !block_bitmap || !inode_bitmap || !inode_table) return -1;
     fseek(disk, off_block_bitmap, SEEK_SET);
     fwrite(block_bitmap, 1, computed_block_bitmap_bytes, disk);
+
+    fseek(disk, off_inode_bitmap, SEEK_SET);
     fwrite(inode_bitmap, 1, computed_inode_bitmap_bytes, disk);
+
+    fseek(disk, off_inode_table, SEEK_SET);
     fwrite(inode_table, 1, computed_inode_table_bytes, disk);
+
     fflush(disk);
     fsync(fileno(disk));
-    rewind(disk);
+
     return 0;
 }
 
-/* ---- unmount_fs ---- */
+/* ---- Desmonta FS ---- */
 int unmount_fs(void) {
     sync_fs();
-    free(block_bitmap); block_bitmap=NULL;
-    free(inode_bitmap); inode_bitmap=NULL;
-    free(inode_table); inode_table=NULL;
-    if (disk) { fclose(disk); disk=NULL; }
+    free(block_bitmap); block_bitmap = NULL;
+    free(inode_bitmap); inode_bitmap = NULL;
+    free(inode_table); inode_table = NULL;
+    if (disk) { fclose(disk); disk = NULL; }
     return 0;
 }
+
 
 /* ---- alocação ---- */
 int allocateBlock(void) {
@@ -234,7 +279,7 @@ void freeInode(int inode_index) {
 /* ---- leitura e escrita ---- */
 int readBlock(uint32_t block_index, void *buffer){
     if (!disk || block_index >= computed_data_blocks) return -1;
-    off_t offset = offset_data_region() + (off_t)block_index * BLOCK_SIZE;
+    off_t offset = off_data_region + (off_t)block_index * BLOCK_SIZE;
     fseek(disk, offset, SEEK_SET);
     size_t read_bytes = fread(buffer, 1, BLOCK_SIZE, disk);
     return (read_bytes == BLOCK_SIZE) ? 0 : -1;
@@ -242,7 +287,7 @@ int readBlock(uint32_t block_index, void *buffer){
 
 int writeBlock(uint32_t block_index, const void *buffer){
     if (!disk || block_index >= computed_data_blocks) return -1;
-    off_t offset = offset_data_region() + (off_t)block_index * BLOCK_SIZE;
+    off_t offset = off_data_region + (off_t)block_index * BLOCK_SIZE;
     fseek(disk, offset, SEEK_SET);
     size_t written_bytes = fwrite(buffer, 1, BLOCK_SIZE, disk);
     fflush(disk);
@@ -252,8 +297,13 @@ int writeBlock(uint32_t block_index, const void *buffer){
 
 /* ---- diretórios ---- */
 int dirFindEntry(int dir_inode, const char *name, inode_type_t type, int *out_inode) {
-    if (dir_inode < 0 || dir_inode >= MAX_INODES || !name|| !out_inode) 
+    if (dir_inode < 0 || dir_inode >= MAX_INODES || !name || !out_inode) 
         return -1;
+
+    if (strlen(name) >= sizeof(((dir_entry_t*)0)->name)) {
+        // nome muito grande para o campo do dir_entry_t
+        return -1;
+    }
 
     int current_inode = dir_inode;
 
@@ -264,23 +314,38 @@ int dirFindEntry(int dir_inode, const char *name, inode_type_t type, int *out_in
         for (int i = 0; i < BLOCKS_PER_INODE; i++) {
             if (dir->blocks[i] == 0) continue;
 
-            dir_entry_t buffer[BLOCK_SIZE / sizeof(dir_entry_t)];
-            if (readBlock(dir->blocks[i], buffer) != 0) return -1;
+            // buffer alocado dinamicamente para não sobrecarregar a pilha
+            dir_entry_t *buffer = malloc(BLOCK_SIZE);
+            if (!buffer) return -1;
 
-            for (int j = 0; j < BLOCK_SIZE / sizeof(dir_entry_t); j++) {
-                if (buffer[j].inode_index != 0 && strcmp(buffer[j].name, name) == 0 && (inode_table[buffer[j].inode_index].type == type || type == FILE_ANY)) {
+            if (readBlock(dir->blocks[i], buffer) != 0) {
+                free(buffer);
+                return -1;
+            }
+
+            int entries = BLOCK_SIZE / sizeof(dir_entry_t);
+            for (int j = 0; j < entries; j++) {
+                if (buffer[j].inode_index != 0 &&
+                    strcmp(buffer[j].name, name) == 0 &&
+                    (inode_table[buffer[j].inode_index].type == type || type == FILE_ANY)) {
                     *out_inode = buffer[j].inode_index;
+                    free(buffer);
                     return 0;
                 }
             }
+
+            free(buffer);
         }
-        if (dir->next_inode == 0){
+
+        if (dir->next_inode == 0)
             break;
-         }
-         current_inode = dir->next_inode;
+
+        current_inode = dir->next_inode;
     }
+
     return -1;
 }
+
 
 int dirAddEntry(int dir_inode, const char *name, inode_type_t type, int inode_index) {
     if (dir_inode < 0 || dir_inode >= MAX_INODES || !name) return -1;
@@ -752,47 +817,41 @@ int readContentFromFile(int parent_inode, const char *name, char *buffer, size_t
     return 0;
 }
 
-int resolvePath(const char *path, int *inode_out) {
+int resolvePath(const char *path, int current_inode, int *inode_out) {
     if (!path || !inode_out) return -1;
 
-    int current;
-    // Caminho absoluto ou relativo
+    int current = current_inode;
+
+    // Caminho absoluto
     if (path[0] == '~') {
         current = ROOT_INODE;
+        path++; // pula o '~'
+        if (*path == '/') path++; // pula barra inicial
     }
 
     char token[256];
     const char *p = path;
     while (*p) {
-        // Extrair o próximo token
         int i = 0;
         while (*p && *p != '/') token[i++] = *p++;
         token[i] = '\0';
-        if (*p == '/') p++; // pula a barra
+        if (*p == '/') p++; // pula barra
 
-        if (strcmp(token, ".") == 0 || token[0] == '\0') {
-            // "." ou token vazio (duas barras consecutivas), não faz nada
-            continue;
-        }
+        if (strcmp(token, ".") == 0 || token[0] == '\0') continue;
 
         if (strcmp(token, "..") == 0) {
-            // sobe um nível
-            if (current == ROOT_INODE) continue; // já está na raiz
             int parent_inode;
-            if (dirFindEntry(current, "..", FILE_DIRECTORY, &parent_inode) != 0) {
-                // falha ao encontrar o pai
-                return -1;
-            }
+            if (dirFindEntry(current, "..", FILE_DIRECTORY, &parent_inode) != 0) return -1;
             current = parent_inode;
             continue;
         }
 
-        // token normal: desce para o diretório/arquivo
         int next_inode;
-        if (!dirFindEntry(current, token, FILE_DIRECTORY, &next_inode)) {
-            // falha ao encontrar a entrada
-            return -1;
-        }
+        const char *next_slash = strchr(p, '/');
+        int type = next_slash ? FILE_DIRECTORY : FILE_ANY;
+
+        if (dirFindEntry(current, token, type, &next_inode) != 0) return -1;
+
         int depth = 0;
         while (inode_table[next_inode].link_target_index != -1) {
             next_inode = inode_table[next_inode].link_target_index;
@@ -803,8 +862,9 @@ int resolvePath(const char *path, int *inode_out) {
     }
 
     *inode_out = current;
-    return 0; // sucesso
+    return 0;
 }
+
 
 int createSymlink(int parent_inode, int target_index, const char *link_name, inode_type_t type, const char *user) {
     // 1. Verifica se link_name já existe
@@ -841,94 +901,155 @@ int createSymlink(int parent_inode, int target_index, const char *link_name, ino
     return 0;
 }
 
-int cmd_cd(int *current_inode, const char *path){
+/* ---- Comandos de FS ---- */
+
+// cd
+int cmd_cd(int *current_inode, const char *path) {
     if (!current_inode || !path) return -1;
 
     int target_inode;
-    if (resolvePath(path, &target_inode) != 0) return -1;
+    if (resolvePath(path, *current_inode, &target_inode) != 0) return -1;
+
+    inode_t *inode = &inode_table[target_inode];
+    if (inode->type != FILE_DIRECTORY) return -1;
 
     *current_inode = target_inode;
-
     return 0;
 }
 
-
-
-int cmd_mkdir(const char *path, const char *name, const char *user){
+// mkdir
+int cmd_mkdir(int current_inode, const char *path, const char *name, const char *user) {
     if (!path || !name || !user) return -1;
 
-    int parent;
-    if (resolvePath(path, &parent) != 0) return -1;
+    int parent_inode;
+    if (resolvePath(path, current_inode, &parent_inode) != 0) return -1;
 
-    if (createDirectory(parent, name, user) != 0) return -1;
-    return 0;
+    return createDirectory(parent_inode, name, user);
 }
 
-int cmd_touch(const char *path, const char *name, const char *user){
+// touch
+int cmd_touch(int current_inode, const char *path, const char *name, const char *user) {
     if (!path || !name || !user) return -1;
 
-    int parent;
-    if (resolvePath(path, &parent) != 0) return -1;
+    int parent_inode;
+    if (resolvePath(path, current_inode, &parent_inode) != 0) return -1;
 
-    if (createFile(parent, name, user) != 0) return -1;
-    return 0;
+    return createFile(parent_inode, name, user);
 }
 
-int cmd_echo_arrow(const char *path, const char *name, const char *content, const char *user){
-    if (!path || !name || !content ||!user) return -1;
-
-    int parent;
-    if (resolvePath(path, &parent) != 0) return -1;
-
-    int inode;
-    if (dirFindEntry(parent, name, FILE_REGULAR, &inode) != 0){
-        if (createFile(parent, name, user) != 0) return -1;
-    }
-
-    
-    if (addContentToFile(parent, name, content, user) != 0) return -1;
-        
-    
-    return 0;
-}
-
-int cmd_echo_arrow_arrow(const char *path, const char *name, const char *content, const char *user) {
+// echo >
+int cmd_echo_arrow(int current_inode, const char *path, const char *name, const char *content, const char *user) {
     if (!path || !name || !content || !user) return -1;
 
-    int parent;
-    if (resolvePath(path, &parent) != 0) return -1;
+    int parent_inode;
+    if (resolvePath(path, current_inode, &parent_inode) != 0) return -1;
 
     int inode_index;
-    if (dirFindEntry(parent, name, FILE_REGULAR, &inode_index) == 0) {
-        inode_t *inode = &inode_table[inode_index];
-        size_t current_size = inode->size;
-        size_t content_size = strlen(content);
-        size_t buffer_size = current_size + content_size + 1;
-
-        char *buffer = malloc(buffer_size);
-        if (!buffer) return -1;
-
-        size_t bytes_read;
-        if (readContentFromFile(parent, name, buffer, buffer_size, &bytes_read, user) != 0) {
-            free(buffer);
-            return -1;
-        }
-
-        memcpy(buffer + bytes_read, content, content_size);
-        buffer[bytes_read + content_size] = '\0';
-
-        if (addContentToFile(parent, name, buffer, user) != 0) {
-            free(buffer);
-            return -1;
-        }
-
-        free(buffer);
-    } else {
-        if (createFile(parent, name, user) != 0) return -1;
-        if (addContentToFile(parent, name, content, user) != 0) return -1;
+    if (dirFindEntry(parent_inode, name, FILE_REGULAR, &inode_index) != 0) {
+        if (createFile(parent_inode, name, user) != 0) return -1;
     }
 
-    return 0;
+    return addContentToFile(parent_inode, name, content, user);
+}
+
+// echo >>
+int cmd_echo_arrow_arrow(int current_inode, const char *path, const char *name, const char *content, const char *user) {
+    if (!path || !name || !content || !user) return -1;
+
+    int parent_inode;
+    if (resolvePath(path, current_inode, &parent_inode) != 0) return -1;
+
+    int inode_index;
+    size_t current_size = 0;
+
+    if (dirFindEntry(parent_inode, name, FILE_REGULAR, &inode_index) != 0) {
+        if (createFile(parent_inode, name, user) != 0) return -1;
+        inode_index = -1;
+    }
+
+    inode_t *inode = (inode_index >= 0) ? &inode_table[inode_index] : NULL;
+    if (inode) current_size = inode->size;
+
+    size_t content_size = strlen(content);
+    size_t buffer_size = current_size + content_size + 1;
+    char *buffer = malloc(buffer_size);
+    if (!buffer) return -1;
+
+    size_t bytes_read = 0;
+    if (inode && readContentFromFile(parent_inode, name, buffer, buffer_size, &bytes_read, user) != 0) {
+        free(buffer);
+        return -1;
+    }
+
+    memcpy(buffer + bytes_read, content, content_size);
+    buffer[bytes_read + content_size] = '\0';
+
+    int res = addContentToFile(parent_inode, name, buffer, user);
+    free(buffer);
+    return res;
+}
+
+// cp (copy)
+int cmd_cp(int current_inode, const char *src_path, const char *src_name,
+           const char *dst_path, const char *dst_name, const char *user) {
+    if (!src_path || !src_name || !dst_path || !dst_name || !user) return -1;
+
+    int src_inode;
+    if (resolvePath(src_path, current_inode, &src_inode) != 0) return -1;
+
+    int file_inode;
+    if (dirFindEntry(src_inode, src_name, FILE_REGULAR, &file_inode) != 0) return -1;
+
+    int dst_inode;
+    if (resolvePath(dst_path, current_inode, &dst_inode) != 0) return -1;
+
+    inode_t *inode = &inode_table[file_inode];
+    char *buffer = malloc(inode->size + 1);
+    if (!buffer) return -1;
+
+    size_t bytes_read;
+    if (readContentFromFile(src_inode, src_name, buffer, inode->size + 1, &bytes_read, user) != 0) {
+        free(buffer);
+        return -1;
+    }
+
+    if (createFile(dst_inode, dst_name, user) != 0) {
+        free(buffer);
+        return -1;
+    }
+
+    int result = addContentToFile(dst_inode, dst_name, buffer, user);
+    free(buffer);
+    return result;
+}
+
+// mv (move)
+int cmd_mv(int current_inode, const char *src_path, const char *src_name,
+           const char *dst_path, const char *dst_name, const char *user) {
+    if (cmd_cp(current_inode, src_path, src_name, dst_path, dst_name, user) != 0) return -1;
+
+    int src_inode;
+    if (resolvePath(src_path, current_inode, &src_inode) != 0) return -1;
+
+    return deleteFile(src_inode, src_name, user);
+}
+
+// ln -s (symlink)
+int cmd_ln_s(int current_inode, const char *target_path, const char *target_name,
+             const char *link_path, const char *link_name, const char *user) {
+    if (!target_path || !target_name || !link_path || !link_name || !user) return -1;
+
+    int target_dir;
+    if (resolvePath(target_path, current_inode, &target_dir) != 0) return -1;
+
+    int target_inode;
+    if (dirFindEntry(target_dir, target_name, FILE_ANY, &target_inode) != 0) return -1;
+
+    int link_dir;
+    if (resolvePath(link_path, current_inode, &link_dir) != 0) return -1;
+
+    inode_t *inode = &inode_table[target_inode];
+    return createSymlink(link_dir, target_inode, link_name, inode->type, user);
 }
 
 
