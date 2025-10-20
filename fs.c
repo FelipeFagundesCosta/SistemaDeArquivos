@@ -1158,6 +1158,7 @@ int cmd_ln_s(int current_inode, const char *target_path, const char *target_name
 int cmd_ls(int current_inode, const char *path, const char *user) {
     if (!user) return -1;
 
+    // checa se o caminho existe
     int target_inode = current_inode;
     if (path && strlen(path) > 0) {
         if (resolvePath(path, current_inode, &target_inode) != 0) {
@@ -1165,61 +1166,45 @@ int cmd_ls(int current_inode, const char *path, const char *user) {
             return -1;
         }
     }
-
+    
     inode_t *dir_inode = &inode_table[target_inode];
-    if (dir_inode->type != FILE_DIRECTORY) {
-        printf("ls: não é um diretório: %s\n", path ? path : "(atual)");
-        return -1;
-    }
 
-    while (1)
-    {
-        for (int i = 0; i < BLOCKS_PER_INODE; i++) {
-            if (dir_inode->blocks[i] == 0) continue;
-
+    // itera sobre cada next dentro do inode
+    do {
+        // itera sobre cada bloco dentro do inode do diretório
+        for (int block_idx = 0; block_idx < BLOCKS_PER_INODE; block_idx++) {
+            if (dir_inode->blocks[block_idx] == 0) continue; // caso o bloco esteja vazio, pula
+            
+            // lê o bloco no disco
             dir_entry_t *entries = malloc(BLOCK_SIZE);
-            if (!entries) return -1;
-
-            if (readBlock(dir_inode->blocks[i], entries) != 0) {
+            if (readBlock(dir_inode->blocks[block_idx], entries) != 0) {
                 free(entries);
                 return -1;
             }
-
+            
+            // Separa as entradas {name, inode index} contidas em cada bloco
             int entries_per_block = BLOCK_SIZE / sizeof(dir_entry_t);
-            for (int j = 0; j < entries_per_block; j++) {
-                if (entries[j].inode_index == 0)
+            for (int entry_idx = 0; entry_idx < entries_per_block; entry_idx++) {
+                if (entries[entry_idx].inode_index == 0)
                     continue;
+                
+                
+                inode_t *entry_inode = &inode_table[entries[entry_idx].inode_index];
 
-                inode_t *entry_inode = &inode_table[entries[j].inode_index];
-
-                char type_char;
-                switch (entry_inode->type) {
-                    case FILE_DIRECTORY: type_char = 'd'; break;
-                    case FILE_REGULAR:   type_char = '-'; break;
-                    case FILE_SYMLINK:   type_char = 'l'; break;
-                    default:             type_char = '?'; break;
-                }
-
-                printf("%c %-20s %8u bytes\n", 
-                    type_char, 
-                    entries[j].name, 
-                    entry_inode->size);
+                printf("%c     %s\n", entry_inode->type == FILE_REGULAR? "-f" : "d", entry_inode->name);
             }
 
             free(entries);
         }
-        if (dir_inode->next_inode != 0) {
-            dir_inode = &inode_table[dir_inode->next_inode];
-        }
-        else break;
-    }
+        // Aponta para o próximo inode, se existir
+        dir_inode = &inode_table[dir_inode->next_inode];
+    } while (dir_inode->next_inode != 0);
     return 0;
 }
 
 int cmd_remove(int current_inode, const char *filepath, const char *user, int remove_dir) {
     if (!filepath || !user) return -1;
 
-    // Suporte limitado ao tamanho do path
     char path_copy[1024];
     strncpy(path_copy, filepath, sizeof(path_copy) - 1);
     path_copy[sizeof(path_copy) - 1] = '\0';
@@ -1276,6 +1261,7 @@ int cmd_remove(int current_inode, const char *filepath, const char *user, int re
 
     inode_t *target = &inode_table[target_inode];
 
+    // Verifica conforme o tipo de rm (e.g. rm ou rmdir)
     if (remove_dir) {
         if (target->type != FILE_DIRECTORY) {
             printf("rmdir: não é um diretório: %s\n", filepath);
