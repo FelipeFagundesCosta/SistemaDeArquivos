@@ -71,6 +71,9 @@ int main() {
                 printf("Uso: echo >|>> arquivo conteudo\n");
             }
         }
+        else if (strcmp(cmd, "ls") == 0) {
+            cmd_ls(current_inode, ".");
+        }
         else if (strcmp(cmd, "cp") == 0 && arg1 && arg2 && arg3) {
             cmd_cp(current_inode, ".", arg1, ".", arg2, user);
         }

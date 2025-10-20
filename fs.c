@@ -1120,3 +1120,13 @@ int cmd_ln_s(int current_inode, const char *target_path, const char *target_name
 }
 
 
+int cmd_ls(int current_inode, const char *path) {
+    if (strcmp(path, ".") == 0) {
+        printf("ta vivo\n");
+        fs_dir_list_t list = listElements(current_inode);
+        // for (int element = 0; element <= list.count; element++) {
+        //     printf("%s\n", list.entries[element].name);
+        // }
+    }
+}
+
