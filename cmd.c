@@ -51,10 +51,10 @@ int main() {
             cmd_cd(&current_inode, arg1);
         }
         else if (strcmp(cmd, "mkdir") == 0 && arg1) {
-            cmd_mkdir(current_inode, ".", arg1, user);
+            cmd_mkdir(current_inode, arg1, user);
         }
         else if (strcmp(cmd, "touch") == 0 && arg1) {
-            cmd_touch(current_inode, ".", arg1, user);
+            cmd_touch(current_inode, arg1, user);
         }
         else if (strcmp(cmd, "rm") == 0 && arg1) {
             cmd_rm(current_inode, arg1, user);
@@ -69,10 +69,10 @@ int main() {
 
             if (redir && filename && content) {
                 if (strcmp(redir, ">") == 0) {
-                    cmd_echo_arrow(current_inode, ".", filename, content, user);
+                    cmd_echo_arrow(current_inode, filename, content, user);
                 }
                 else if (strcmp(redir, ">>") == 0) {
-                    cmd_echo_arrow_arrow(current_inode, ".", filename, content, user);
+                    cmd_echo_arrow_arrow(current_inode, filename, content, user);
                 }
             } else {
                 printf("Uso: echo arquivo >|>> conteudo\n");
@@ -85,7 +85,7 @@ int main() {
         else if (strcmp(cmd, "ls") == 0) {
             cmd_ls(current_inode, arg1? arg1 : ".", user);
         }
-        else if (strcmp(cmd, "cp") == 0 && arg1 && arg2 && arg3) {
+        else if (strcmp(cmd, "cp") == 0 && arg1 && arg2) {
             cmd_cp(current_inode, ".", arg1, ".", arg2, user);
         }
         else if (strcmp(cmd, "mv") == 0 && arg1 && arg2) {
