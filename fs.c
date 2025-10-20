@@ -101,9 +101,10 @@ int init_fs(void) {
     inode_table[root_inode].size = 0;
     inode_table[root_inode].creation_date = time(NULL);
     inode_table[root_inode].modification_date = time(NULL);
-    strcpy(inode_table[root_inode].name, "/");
+    strcpy(inode_table[root_inode].name, "~");
     strcpy(inode_table[root_inode].owner, "root");
-    inode_table[root_inode].blocks[0] = allocateBlock();
+    dirAddEntry(ROOT_INODE, ".", FILE_DIRECTORY, ROOT_INODE);
+    dirAddEntry(ROOT_INODE, "..", FILE_DIRECTORY, ROOT_INODE);
     sync_inode(root_inode);
 
     /* Escreve header no disco */
@@ -957,6 +958,64 @@ int createSymlink(int parent_inode, int target_index, const char *link_name, con
     return 0;
 }
 
+int createDirectoriesRecursively(const char *path, int current_inode, const char *user) {
+    if (!path || !user) return -1;
+    if (path[0] == '\0') return -1;
+
+    // Se path == "." nada a fazer
+    if (strcmp(path, ".") == 0) return 0;
+
+    // Vamos caminhar token por token, tentando resolver cada nível e criando quando não existir.
+    int cur = current_inode;
+
+    // Se começa com '~' (você já trata isso no resolvePath), trate como absoluto
+    const char *p = path;
+    if (p[0] == '~') {
+        cur = ROOT_INODE;
+        p++;
+        if (*p == '/') p++;
+    }
+
+    char token[256];
+    while (*p) {
+        int i = 0;
+        // extrai token até '/' ou fim
+        while (*p && *p != '/' && i < (int)sizeof(token)-1) token[i++] = *p++;
+        token[i] = '\0';
+        if (*p == '/') p++; // pula '/'
+
+        if (token[0] == '\0' || strcmp(token, ".") == 0) continue;
+        if (strcmp(token, "..") == 0) {
+            int parent_inode;
+            if (dirFindEntry(cur, "..", FILE_DIRECTORY, &parent_inode) != 0) return -1;
+            cur = parent_inode;
+            continue;
+        }
+
+        int next_inode;
+        // tentamos achar token no diretório atual (aceitamos FILE_DIRECTORY ou FILE_SYMLINK -> seguido)
+        if (dirFindEntry(cur, token, FILE_DIRECTORY, &next_inode) != 0) {
+            // não existe -> criar diretório aqui
+            if (createDirectory(cur, token, user) != 0) {
+                return -1;
+            }
+            // recuperar inode do diretório criado
+            if (dirFindEntry(cur, token, FILE_DIRECTORY, &next_inode) != 0) return -1;
+        }
+
+        // se for symlink, resolva link_target_index (resolvePath já faz isso, mas como estamos passo a passo:)
+        int depth = 0;
+        while (inode_table[next_inode].type == FILE_SYMLINK) {
+            next_inode = inode_table[next_inode].link_target_index;
+            if (++depth > 16) return -1;
+        }
+
+        cur = next_inode;
+    }
+
+    return 0;
+}
+
 /* ---- Comandos de FS ---- */
 
 // cd
@@ -973,32 +1032,64 @@ int cmd_cd(int *current_inode, const char *path) {
     return 0;
 }
 
-// mkdir
-int cmd_mkdir(int current_inode, const char *path, const char *name, const char *user) {
-    if (!path || !name || !user) return -1;
+// Função auxiliar para separar caminho e último segmento
+static void splitPath(const char *full_path, char *dir_path, char *base_name) {
+    const char *last_slash = strrchr(full_path, '/');
+    if (last_slash) {
+        size_t dir_len = last_slash - full_path;
+        strncpy(dir_path, full_path, dir_len);
+        dir_path[dir_len] = '\0';
+        strcpy(base_name, last_slash + 1);
+    } else {
+        strcpy(dir_path, "."); // diretório atual
+        strcpy(base_name, full_path);
+    }
+}
+
+// mkdir com criação recursiva (estilo cp)
+int cmd_mkdir(int current_inode, const char *full_path, const char *user) {
+    if (!full_path || !user) return -1;
+
+    char dir_path[256], name[256];
+    splitPath(full_path, dir_path, name);
 
     int parent_inode;
-    if (resolvePath(path, current_inode, &parent_inode) != 0) return -1;
+    if (resolvePath(dir_path, current_inode, &parent_inode) != 0) {
+        if (createDirectoriesRecursively(dir_path, current_inode, user) != 0) return -1;
+        if (resolvePath(dir_path, current_inode, &parent_inode) != 0) return -1;
+    }
 
     return createDirectory(parent_inode, name, user);
 }
 
-// touch
-int cmd_touch(int current_inode, const char *path, const char *name, const char *user) {
-    if (!path || !name || !user) return -1;
+// touch com criação recursiva
+int cmd_touch(int current_inode, const char *full_path, const char *user) {
+    if (!full_path || !user) return -1;
+
+    char dir_path[256], name[256];
+    splitPath(full_path, dir_path, name);
 
     int parent_inode;
-    if (resolvePath(path, current_inode, &parent_inode) != 0) return -1;
+    if (resolvePath(dir_path, current_inode, &parent_inode) != 0) {
+        if (createDirectoriesRecursively(dir_path, current_inode, user) != 0) return -1;
+        if (resolvePath(dir_path, current_inode, &parent_inode) != 0) return -1;
+    }
 
     return createFile(parent_inode, name, user);
 }
 
-// echo >
-int cmd_echo_arrow(int current_inode, const char *path, const char *name, const char *content, const char *user) {
-    if (!path || !name || !content || !user) return -1;
+// echo > (sobrescreve conteúdo) com criação recursiva
+int cmd_echo_arrow(int current_inode, const char *full_path, const char *content, const char *user) {
+    if (!full_path || !content || !user) return -1;
+
+    char dir_path[256], name[256];
+    splitPath(full_path, dir_path, name);
 
     int parent_inode;
-    if (resolvePath(path, current_inode, &parent_inode) != 0) return -1;
+    if (resolvePath(dir_path, current_inode, &parent_inode) != 0) {
+        if (createDirectoriesRecursively(dir_path, current_inode, user) != 0) return -1;
+        if (resolvePath(dir_path, current_inode, &parent_inode) != 0) return -1;
+    }
 
     int inode_index;
     if (dirFindEntry(parent_inode, name, FILE_REGULAR, &inode_index) != 0) {
@@ -1007,22 +1098,25 @@ int cmd_echo_arrow(int current_inode, const char *path, const char *name, const 
     }
 
     inode_t *inode = &inode_table[inode_index];
-
-    // Substitui o conteúdo: resetar inode
     inode->size = 0;
-    for (int i = 0; i < BLOCKS_PER_INODE; i++) inode->blocks[i] = 0;
     inode->next_inode = 0;
+    for (int i = 0; i < BLOCKS_PER_INODE; i++) inode->blocks[i] = 0;
 
     return addContentToInode(inode_index, content, strlen(content), user);
 }
 
+// echo >> (anexa conteúdo) com criação recursiva
+int cmd_echo_arrow_arrow(int current_inode, const char *full_path, const char *content, const char *user) {
+    if (!full_path || !content || !user) return -1;
 
-// echo >>
-int cmd_echo_arrow_arrow(int current_inode, const char *path, const char *name, const char *content, const char *user) {
-    if (!path || !name || !content || !user) return -1;
+    char dir_path[256], name[256];
+    splitPath(full_path, dir_path, name);
 
     int parent_inode;
-    if (resolvePath(path, current_inode, &parent_inode) != 0) return -1;
+    if (resolvePath(dir_path, current_inode, &parent_inode) != 0) {
+        if (createDirectoriesRecursively(dir_path, current_inode, user) != 0) return -1;
+        if (resolvePath(dir_path, current_inode, &parent_inode) != 0) return -1;
+    }
 
     int inode_index;
     if (dirFindEntry(parent_inode, name, FILE_REGULAR, &inode_index) != 0) {
@@ -1032,6 +1126,7 @@ int cmd_echo_arrow_arrow(int current_inode, const char *path, const char *name, 
 
     return addContentToInode(inode_index, content, strlen(content), user);
 }
+
 
 
 int cmd_cat(int current_inode, const char *path, const char *user) {
@@ -1071,55 +1166,104 @@ int cmd_cat(int current_inode, const char *path, const char *user) {
     return 0;
 }
 
-
-
-
-// cp (copy)
+// Versão robusta de cmd_cp.
+// src_path/dst_path podem ser "." para indicar diretório atual.
+// src_name / dst_name podem conter barras (ex: "subdir/file") — nesse caso a parte de diretório será usada.
 int cmd_cp(int current_inode, const char *src_path, const char *src_name,
            const char *dst_path, const char *dst_name, const char *user) {
-    if (!src_path || !src_name || !dst_path || !dst_name || !user) return -1;
+    if (!src_name || !dst_name || !user) return -1;
 
-    // Resolve diretórios de origem e destino
-    int src_parent_inode;
-    if (resolvePath(src_path, current_inode, &src_parent_inode) != 0) return -1;
+    int src_parent_inode = current_inode;
+    int dst_parent_inode = current_inode;
+    const char *src_base = src_name;
+    const char *dst_base = dst_name;
 
-    int dst_parent_inode;
-    if (resolvePath(dst_path, current_inode, &dst_parent_inode) != 0) return -1;
+    // Se src_name contem '/', separe dir e base
+    char tmpbuf[256];
+    const char *slash = strrchr(src_name, '/');
+    if (slash) {
+        size_t dirlen = slash - src_name;
+        if (dirlen >= sizeof(tmpbuf)) return -1;
+        strncpy(tmpbuf, src_name, dirlen);
+        tmpbuf[dirlen] = '\0';
+        src_base = slash + 1;
+        if (resolvePath(tmpbuf, current_inode, &src_parent_inode) != 0) return -1;
+    } else {
+        // se foi passado um src_path != "." resolva-o
+        if (src_path && src_path[0] != '\0' && strcmp(src_path, ".") != 0) {
+            if (resolvePath(src_path, current_inode, &src_parent_inode) != 0) return -1;
+        }
+    }
 
-    // Encontra inode do arquivo de origem
+    // Processa dst: se dst_name contem '/', separe dir e base
+    slash = strrchr(dst_name, '/');
+    if (slash) {
+        size_t dirlen = slash - dst_name;
+        if (dirlen >= sizeof(tmpbuf)) return -1;
+        strncpy(tmpbuf, dst_name, dirlen);
+        tmpbuf[dirlen] = '\0';
+        dst_base = slash + 1;
+
+        // tenta resolver o diretório; se não existir, tenta criar recursivamente
+        if (resolvePath(tmpbuf, current_inode, &dst_parent_inode) != 0) {
+            if (createDirectoriesRecursively(tmpbuf, current_inode, user) != 0) return -1;
+            if (resolvePath(tmpbuf, current_inode, &dst_parent_inode) != 0) return -1;
+        }
+    } else {
+        // se foi passado um dst_path != "." resolva-o (p.ex.: cp arq dir/arq2 onde dst_path veio como "dir")
+        if (dst_path && dst_path[0] != '\0' && strcmp(dst_path, ".") != 0) {
+            if (resolvePath(dst_path, current_inode, &dst_parent_inode) != 0) {
+                // tentar criar o caminho de destino
+                if (createDirectoriesRecursively(dst_path, current_inode, user) != 0) return -1;
+                if (resolvePath(dst_path, current_inode, &dst_parent_inode) != 0) return -1;
+            }
+        }
+    }
+
+    // Agora temos src_parent_inode + src_base e dst_parent_inode + dst_base
     int src_file_inode;
-    if (dirFindEntry(src_parent_inode, src_name, FILE_REGULAR, &src_file_inode) != 0) return -1;
+    if (dirFindEntry(src_parent_inode, src_base, FILE_REGULAR, &src_file_inode) != 0) {
+        // tenta também aceitar symlink/any (se quiser copiar links) → mas por enquanto requer arquivo regular
+        return -1;
+    }
 
     inode_t *src_inode = &inode_table[src_file_inode];
+    if (!src_inode) return -1;
 
-    // Lê conteúdo direto do inode de origem
+    // Lê o conteúdo diretamente por inode
     char *buffer = malloc(src_inode->size + 1);
     if (!buffer) return -1;
-
-    size_t bytes_read;
+    size_t bytes_read = 0;
     if (readContentFromInode(src_file_inode, buffer, src_inode->size + 1, &bytes_read, user) != 0) {
         free(buffer);
         return -1;
     }
 
-    // Cria arquivo de destino se não existir
+    // Cria arquivo destino se necessário
     int dst_file_inode;
-    if (dirFindEntry(dst_parent_inode, dst_name, FILE_REGULAR, &dst_file_inode) != 0) {
-        if (createFile(dst_parent_inode, dst_name, user) != 0) {
+    if (dirFindEntry(dst_parent_inode, dst_base, FILE_REGULAR, &dst_file_inode) != 0) {
+        if (createFile(dst_parent_inode, dst_base, user) != 0) {
             free(buffer);
             return -1;
         }
-        if (dirFindEntry(dst_parent_inode, dst_name, FILE_REGULAR, &dst_file_inode) != 0) {
+        if (dirFindEntry(dst_parent_inode, dst_base, FILE_REGULAR, &dst_file_inode) != 0) {
             free(buffer);
             return -1;
         }
+    } else {
+        // Se o arquivo já existe, precisamos sobrescrever: zera inode antes de escrever
+        inode_t *dst_inode = &inode_table[dst_file_inode];
+        dst_inode->size = 0;
+        dst_inode->next_inode = 0;
+        for (int i = 0; i < BLOCKS_PER_INODE; ++i) dst_inode->blocks[i] = 0;
     }
 
-    // Adiciona conteúdo ao inode de destino
-    int result = addContentToInode(dst_file_inode, buffer, bytes_read, user);
+    // Escreve no inode destino usando addContentToInode
+    int res = addContentToInode(dst_file_inode, buffer, bytes_read, user);
     free(buffer);
-    return result;
+    return res;
 }
+
 
 
 // mv (move)
@@ -1137,22 +1281,39 @@ int cmd_mv(int current_inode, const char *src_path, const char *src_name,
 
 
 // ln -s (symlink)
-int cmd_ln_s(int current_inode, const char *target_path, const char *target_name,
-             const char *link_path, const char *link_name, const char *user) {
-    if (!target_path || !target_name || !link_path || !link_name || !user) return -1;
+int cmd_ln_s(int current_inode,
+             const char *target_path, const char *target_name,
+             const char *link_path, const char *link_name,
+             const char *user) {
+    if (!target_path || !target_name || !link_path || !link_name || !user)
+        return -1;
 
+    // --- 1. Resolve diretório e inode do alvo ---
     int target_dir;
-    if (resolvePath(target_path, current_inode, &target_dir) != 0) return -1;
+    if (resolvePath(target_path, current_inode, &target_dir) != 0)
+        return -1;
 
     int target_inode;
-    if (dirFindEntry(target_dir, target_name, FILE_ANY, &target_inode) != 0) return -1;
+    if (dirFindEntry(target_dir, target_name, FILE_ANY, &target_inode) != 0)
+        return -1;
 
+    // --- 2. Garante que o diretório do link exista ---
+    // Tenta resolver o link_path normalmente
     int link_dir;
-    if (resolvePath(link_path, current_inode, &link_dir) != 0) return -1;
+    if (resolvePath(link_path, current_inode, &link_dir) != 0) {
+        // Se falhar, cria diretórios recursivamente
+        if (createDirectoriesRecursively(link_path, current_inode, user) != 0)
+            return -1;
 
-    inode_t *inode = &inode_table[target_inode];
+        // Tenta resolver novamente agora que o caminho existe
+        if (resolvePath(link_path, current_inode, &link_dir) != 0)
+            return -1;
+    }
+
+    // --- 3. Cria o link simbólico ---
     return createSymlink(link_dir, target_inode, link_name, user);
 }
+
 
 
 int cmd_ls(int current_inode, const char *path, const char *user) {
