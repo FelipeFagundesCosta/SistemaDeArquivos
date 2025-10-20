@@ -95,6 +95,10 @@ int mount_fs(void);
 int sync_fs(void);
 int unmount_fs(void);
 
+/* Utilitarios */
+const char *format_time(time_t t, char *buf, size_t buflen);
+int show_inode_info(int inode_index);
+
 /* Alocação */
 int allocateBlock(void);
 void freeBlock(int block_index);
@@ -129,8 +133,7 @@ static void splitPath(const char *full_path, char *dir_path, char *base_name);
 
 int createSymlink(int parent_inode, int target_index, const char *link_name, const char *user);
 
-// IMPLEMENTAR ESSAS
-// escolher um para implementar, criar branch a partir da develop com o nome da funcao que pretende implementar (ex: cd_branch)
+// core utils
 int cmd_cd(int *current_inode, const char *path);
 int cmd_cat(int current_inode, const char *path, const char *user);
 int cmd_mkdir(int current_inode, const char *fullpath, const char *user);
@@ -144,7 +147,7 @@ int cmd_mv(int current_inode, const char *src_path, const char *src_name,
            const char *dst_path, const char *dst_name, const char *user);
 int cmd_ln_s(int current_inode, const char *target_path, const char *target_name,
              const char *link_path, const char *link_name, const char *user);
-int cmd_ls(int current_inode, const char *path, const char *user);
+int cmd_ls(int current_inode, const char *path, const char *user, int info_args);
 int cmd_rm(int current_inode, const char *filepath, const char *user);
 int cmd_rmdir(int current_inode, const char *filepath, const char *user);
 

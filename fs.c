@@ -228,6 +228,73 @@ int unmount_fs(void) {
     return 0;
 }
 
+/* ----- Utilitarios --------*/
+
+
+
+
+const char *format_time(time_t t, char *buf, size_t buflen) {
+    if (!buf || buflen == 0) return NULL;
+    struct tm tm;
+    if (localtime_r(&t, &tm) == NULL) {
+        buf[0] = '\0';
+        return buf;
+    }
+    strftime(buf, buflen, "%Y-%m-%d %H:%M:%S", &tm);
+    return buf;
+}
+
+
+
+
+int show_inode_info(int inode_index) {
+    if (!inode_table) return -1;
+    if (inode_index < 0 || inode_index >= MAX_INODES) return -1;
+
+    inode_t *ino = &inode_table[inode_index];
+    char ctime_buf[64] = {0}, mtime_buf[64] = {0};
+    format_time(ino->creation_date, ctime_buf, sizeof(ctime_buf));
+    format_time(ino->modification_date, mtime_buf, sizeof(mtime_buf));
+
+    const char *type_str = "unknown";
+    if (ino->type == FILE_REGULAR) type_str = "regular file";
+    else if (ino->type == FILE_DIRECTORY) type_str = "directory";
+    else if (ino->type == FILE_SYMLINK) type_str = "symlink";
+
+    // Monta string de permissões rwxrwxrwx
+    char perm_str[10] = "---------";
+    int pos = 0;
+    for (int who = 6; who >= 0; who -= 3) {
+        perm_str[pos++] = (ino->permissions & (PERM_READ << who)) ? 'r' : '-';
+        perm_str[pos++] = (ino->permissions & (PERM_WRITE << who)) ? 'w' : '-';
+        perm_str[pos++] = (ino->permissions & (PERM_EXEC << who)) ? 'x' : '-';
+    }
+    perm_str[9] = '\0';
+
+    printf("Inode %d:\n", inode_index);
+    printf("  name: %s\n", ino->name);
+    printf("  type: %s\n", type_str);
+    printf("  creator: %s\n", ino->creator);
+    printf("  owner: %s\n", ino->owner);
+    printf("  size: %u bytes\n", ino->size);
+    printf("  permissions: %s (0%o)\n", perm_str, (unsigned)ino->permissions);
+    printf("  created: %s\n", ctime_buf);
+    printf("  modified: %s\n", mtime_buf);
+    if (ino->type == FILE_SYMLINK) {
+        printf("  symlink -> inode %u\n", ino->link_target_index);
+    }
+    printf("  blocks:");
+    for (int i = 0; i < BLOCKS_PER_INODE; ++i) {
+        if (ino->blocks[i] != 0)
+            printf(" %u", ino->blocks[i]);
+    }
+    if (ino->next_inode != 0) printf("  (next inode: %u)", ino->next_inode);
+    printf("\n");
+
+    return 0;
+}
+
+
 
 /* ---- alocação ---- */
 int allocateBlock(void) {
@@ -1109,6 +1176,7 @@ int cmd_echo_arrow(int current_inode, const char *full_path, const char *content
 int cmd_echo_arrow_arrow(int current_inode, const char *full_path, const char *content, const char *user) {
     if (!full_path || !content || !user) return -1;
 
+
     char dir_path[256], name[256];
     splitPath(full_path, dir_path, name);
 
@@ -1128,20 +1196,23 @@ int cmd_echo_arrow_arrow(int current_inode, const char *full_path, const char *c
 }
 
 
-
+// cat
 int cmd_cat(int current_inode, const char *path, const char *user) {
     if (!path || !user) return -1;
 
+    // resolve o inode do arquivo
     int target_inode;
     if (resolvePath(path, current_inode, &target_inode) != 0)
         return -1;
 
+    // procura o inode pelo indice
     inode_t *inode = &inode_table[target_inode];
     if (!inode || inode->type != FILE_REGULAR) {
         fprintf(stderr, "Erro: %s não é um arquivo regular.\n", path);
         return -1;
     }
 
+    // assegura que há permissão para leitura
     if (!hasPermission(inode, user, PERM_READ)) {
         fprintf(stderr, "Erro: permissão negada para %s.\n", path);
         return -1;
@@ -1153,6 +1224,7 @@ int cmd_cat(int current_inode, const char *path, const char *user) {
     char *buffer = malloc(filesize + 1);
     if (!buffer) return -1;
 
+    // Lê arquivo
     size_t bytes_read = 0;
     if (readContentFromInode(target_inode, buffer, filesize + 1, &bytes_read, user) != 0) {
         free(buffer);
@@ -1315,8 +1387,8 @@ int cmd_ln_s(int current_inode,
 }
 
 
-
-int cmd_ls(int current_inode, const char *path, const char *user) {
+// ls
+int cmd_ls(int current_inode, const char *path, const char *user, int info_arg) {
     if (!user) return -1;
 
     // checa se o caminho existe
@@ -1334,30 +1406,65 @@ int cmd_ls(int current_inode, const char *path, const char *user) {
     do {
         // itera sobre cada bloco dentro do inode do diretório
         for (int block_idx = 0; block_idx < BLOCKS_PER_INODE; block_idx++) {
-            if (dir_inode->blocks[block_idx] == 0) continue; // caso o bloco esteja vazio, pula
+            if (dir_inode->blocks[block_idx] == 0) continue;
             
-            // lê o bloco no disco
             dir_entry_t *entries = malloc(BLOCK_SIZE);
             if (readBlock(dir_inode->blocks[block_idx], entries) != 0) {
                 free(entries);
                 return -1;
             }
             
-            // Separa as entradas {name, inode index} contidas em cada bloco
             int entries_per_block = BLOCK_SIZE / sizeof(dir_entry_t);
             for (int entry_idx = 0; entry_idx < entries_per_block; entry_idx++) {
                 if (entries[entry_idx].inode_index == 0)
                     continue;
-                
-                
-                inode_t *entry_inode = &inode_table[entries[entry_idx].inode_index];
 
-                printf("%c     %s\n", entry_inode->type == FILE_REGULAR? "-f" : "d", entry_inode->name);
+                inode_t *entry_inode = &inode_table[entries[entry_idx].inode_index];
+                
+
+                // Caso utilize o argumento para emular o ls - l
+                if (info_arg) {
+                    // Formata permissões (rwxrwxrwx)
+                    char perm_str[10] = "---------";
+                    for (int who = 6; who >= 0; who -= 3) {
+                        perm_str[8-who-2] = (entry_inode->permissions & (PERM_READ << who)) ? 'r' : '-';
+                        perm_str[8-who-1] = (entry_inode->permissions & (PERM_WRITE << who)) ? 'w' : '-';
+                        perm_str[8-who] = (entry_inode->permissions & (PERM_EXEC << who)) ? 'x' : '-';
+                    }
+
+                    // Formata datas
+                    char ctime_buf[32], mtime_buf[32];
+                    format_time(entry_inode->creation_date, ctime_buf, sizeof(ctime_buf));
+                    format_time(entry_inode->modification_date, mtime_buf, sizeof(mtime_buf));
+
+                    // Determina tipo de arquivo
+                    char type = '-';
+                    if (entry_inode->type == FILE_DIRECTORY) type = 'd';
+                    else if (entry_inode->type == FILE_SYMLINK) type = 'l';
+
+                    printf("%c%s %8s %8s %8lu %s %s", 
+                        type,
+                        perm_str,
+                        entry_inode->owner,
+                        entry_inode->creator,
+                        (unsigned long)entry_inode->size,
+                        mtime_buf, 
+                        entry_inode->name
+                    );
+
+                    // Se for link simbólico, mostra o alvo
+                    if (entry_inode->type == FILE_SYMLINK) {
+                        printf(" -> %s", inode_table[entry_inode->link_target_index].name);
+                    }
+                    printf("\n");
+                }
+                else {
+                    printf("%s     %s\n", entry_inode->type == FILE_REGULAR? "-f" : "-d", entry_inode->name);
+                }
             }
 
             free(entries);
         }
-        // Aponta para o próximo inode, se existir
         dir_inode = &inode_table[dir_inode->next_inode];
     } while (dir_inode->next_inode != 0);
     return 0;
