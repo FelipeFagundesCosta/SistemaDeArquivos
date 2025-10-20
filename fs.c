@@ -1126,9 +1126,20 @@ int cmd_ls(int current_inode, const char *path) {
         while (1)
         {   
             for (int element = 0; element <= BLOCKS_PER_INODE; element++) {
-                if (inode.blocks[element] != 0) {
-                    printf("%s  ", inode_table[inode.blocks[element]].name);
+                switch (inode_table[inode.blocks[element]].type)
+                {
+                case FILE_DIRECTORY:
+                    printf("DIR:  %s ", inode_table[inode.blocks[element]].name);
+                    break;
+                case FILE_REGULAR:
+                    printf("FILE: %s ", inode_table[inode.blocks[element]].name);
+                    break;
+                default:
+                    break;
                 }
+                // if (inode.blocks[element] != 0) {
+                //     printf("%s  ", inode_table[inode.blocks[element]].name);
+                // }
             }
             uint32_t next = inode.next_inode;
             if (next != 0) {
