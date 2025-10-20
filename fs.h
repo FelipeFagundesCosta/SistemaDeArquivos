@@ -19,6 +19,22 @@
 
 #define ROOT_INODE 0
 
+typedef struct {
+    uint32_t magic; // identificador do FS
+    uint32_t block_bitmap_bytes;
+    uint32_t inode_bitmap_bytes;
+    uint32_t inode_table_bytes;
+    uint32_t meta_blocks;
+    uint32_t data_blocks;
+    uint32_t off_block_bitmap;
+    uint32_t off_inode_bitmap;
+    uint32_t off_inode_table;
+    uint32_t off_data_region;
+} fs_header_t;
+
+#define FS_MAGIC 0xF5F5F5F5
+
+
 typedef enum {
     FILE_REGULAR,
     FILE_DIRECTORY,
@@ -106,21 +122,24 @@ int addContentToFile(int parent_inode, const char *name, const char *content, co
 ssize_t getFileSize(int parent_inode, const char *name);
 int readContentFromFile(int parent_inode, const char *name, char *buffer, size_t buffer_size, size_t *out_bytes, const char *user);
 
-int resolvePath(const char *path, int *inode_out);
+int resolvePath(const char *path, int current_inode, int *inode_out);
 
 int createSymlink(int parent_inode, int target_index, const char *link_name, inode_type_t type, const char *user);
 
 // IMPLEMENTAR ESSAS
 // escolher um para implementar, criar branch a partir da develop com o nome da funcao que pretende implementar (ex: cd_branch)
 int cmd_cd(int *current_inode, const char *path);
-int cmd_mkdir(const char *path, const char *name, const char *user);
-int cmd_touch(const char *path, const char *name, const char *user);
-int cmd_echo_arrow(const char *path, const char *name, const char *content, const char *user);
-int cmd_echo_arrow_arrow(const char *path, const char *name, const char *content, const char *user);
+int cmd_mkdir(int current_inode, const char *path, const char *name, const char *user);
+int cmd_touch(int current_inode, const char *path, const char *name, const char *user);
+int cmd_echo_arrow(int current_inode, const char *path, const char *name, const char *content, const char *user);
+int cmd_echo_arrow_arrow(int current_inode, const char *path, const char *name, const char *content, const char *user);
 int cmd_cat();
-int cmd_cp();
-int cmd_mv();
-int cmd_ln_s();
+int cmd_cp(int current_inode, const char *src_path, const char *src_name,
+           const char *dst_path, const char *dst_name, const char *user);
+int cmd_mv(int current_inode, const char *src_path, const char *src_name,
+           const char *dst_path, const char *dst_name, const char *user);
+int cmd_ln_s(int current_inode, const char *target_path, const char *target_name,
+             const char *link_path, const char *link_name, const char *user);
 int cmd_ls();
 int cmd_rm();
 int cmd_rmdir();
@@ -147,5 +166,8 @@ extern size_t computed_inode_bitmap_bytes;
 extern size_t computed_inode_table_bytes;
 extern uint32_t computed_meta_blocks;
 extern uint32_t computed_data_blocks;
+
+extern off_t off_data_region;
+
 
 #endif /* FS_H */
