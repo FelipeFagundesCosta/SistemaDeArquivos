@@ -299,6 +299,7 @@ int writeBlock(uint32_t block_index, const void *buffer){
 int dirFindEntry(int dir_inode, const char *name, inode_type_t type, int *out_inode) {
     if (dir_inode < 0 || dir_inode >= MAX_INODES || !name || !out_inode) 
         return -1;
+    
 
     if (strlen(name) >= sizeof(((dir_entry_t*)0)->name)) {
         // nome muito grande para o campo do dir_entry_t
@@ -309,7 +310,7 @@ int dirFindEntry(int dir_inode, const char *name, inode_type_t type, int *out_in
 
     while (current_inode >= 0) {
         inode_t *dir = &inode_table[current_inode];
-        if (dir->type != FILE_DIRECTORY) return -1;
+        if (dir->type != FILE_DIRECTORY) return -1;        
 
         for (int i = 0; i < BLOCKS_PER_INODE; i++) {
             if (dir->blocks[i] == 0) continue;
@@ -327,7 +328,8 @@ int dirFindEntry(int dir_inode, const char *name, inode_type_t type, int *out_in
             for (int j = 0; j < entries; j++) {
                 if (buffer[j].inode_index != 0 &&
                     strcmp(buffer[j].name, name) == 0 &&
-                    (inode_table[buffer[j].inode_index].type == type || type == FILE_ANY|| inode_table[buffer[j].inode_index].link_target_index != -1)) {
+                    (inode_table[buffer[j].inode_index].type == type || type == FILE_SYMLINK || type == FILE_ANY)) {
+                        
                     *out_inode = buffer[j].inode_index;
                     free(buffer);
                     return 0;
@@ -657,14 +659,14 @@ int deleteFile(int parent_inode, const char *name, const char *user){
     inode_t *target = &inode_table[target_inode];
     if (!hasPermission(target, user, PERM_WRITE)) return -1;
 
-    if (target->type != FILE_REGULAR) return -1;
+    if (target->type != FILE_REGULAR && target->type != FILE_SYMLINK) return -1;
 
     for (int i = 0; i < BLOCKS_PER_INODE; i++) {
         if (target->blocks[i] != 0)
             freeBlock(target->blocks[i]);
     }
 
-    if (dirRemoveEntry(parent_inode, name, FILE_REGULAR) == -1) return -1;
+    if (dirRemoveEntry(parent_inode, name, target->type) == -1) return -1;
     freeInode(target_inode);
     sync_fs();
     return 0;
@@ -676,6 +678,11 @@ fs_dir_list_t listElements(int parent_inode) {
     if (parent_inode < 0 || parent_inode >= MAX_INODES) return result;
 
     inode_t *dir = &inode_table[parent_inode];
+    int depth = 0;
+    while (dir->type == FILE_SYMLINK){
+        dir = &inode_table[dir->link_target_index];
+        if (++depth > 16) return result;
+    }
     if (dir->type != FILE_DIRECTORY) return result;
 
     int capacity = 16; // capacidade inicial do array
@@ -748,8 +755,10 @@ int addContentToFile(int parent_inode, const char *name, const char *content, co
     int target_inode;
     if (dirFindEntry(parent_inode, name, FILE_REGULAR, &target_inode) != 0) return -1;
 
-    if (inode_table[target_inode].link_target_index != -1){
+    int depth = 0;
+    while (inode_table[target_inode].type == FILE_SYMLINK){
         target_inode = inode_table[target_inode].link_target_index;
+        if (++depth > 16) return -1;
     }
 
     inode_t *inode = &inode_table[target_inode];
@@ -839,9 +848,12 @@ int readContentFromFile(int parent_inode, const char *name, char *buffer, size_t
         return -1;
     }
 
-    if (inode_table[target_inode].link_target_index != -1){
+    int depth = 0;
+    while (inode_table[target_inode].type == FILE_SYMLINK){
         target_inode = inode_table[target_inode].link_target_index;
+        if (++depth > 16) return -1;
     }
+
 
     inode_t *inode = &inode_table[target_inode];
     if (!hasPermission(inode, user, PERM_READ)) return -1;
@@ -911,7 +923,7 @@ int resolvePath(const char *path, int current_inode, int *inode_out) {
             current = parent_inode;
             continue;
         }
-
+        
         int next_inode;
         const char *next_slash = strchr(p, '/');
         int type = next_slash ? FILE_DIRECTORY : FILE_ANY;
@@ -919,7 +931,7 @@ int resolvePath(const char *path, int current_inode, int *inode_out) {
         if (dirFindEntry(current, token, type, &next_inode) != 0) return -1;
 
         int depth = 0;
-        while (inode_table[next_inode].link_target_index != -1) {
+        while (inode_table[next_inode].type == FILE_SYMLINK) {
             next_inode = inode_table[next_inode].link_target_index;
             if (++depth > 16) return -1; // evita loops
         }
@@ -932,10 +944,11 @@ int resolvePath(const char *path, int current_inode, int *inode_out) {
 }
 
 
-int createSymlink(int parent_inode, int target_index, const char *link_name, inode_type_t type, const char *user) {
+int createSymlink(int parent_inode, int target_index, const char *link_name, const char *user) {
     // 1. Verifica se link_name já existe
     int dummy_output;
-    if (dirFindEntry(parent_inode, link_name, type, &dummy_output)) return -1; // erro, já existe
+    if (!dirFindEntry(parent_inode, link_name, FILE_SYMLINK, &dummy_output)) return -1; // erro, já existe
+    
 
     inode_t *parent = &inode_table[parent_inode];
     if (!hasPermission(parent, user, PERM_WRITE)) return -1;
@@ -948,7 +961,7 @@ int createSymlink(int parent_inode, int target_index, const char *link_name, ino
     // 3. Preenche campos
     strncpy(inode->name, link_name, MAX_NAMESIZE-1);
     inode->name[MAX_NAMESIZE-1] = '\0';
-    inode->type = type;
+    inode->type = FILE_SYMLINK;
     inode->size = 0;
     inode->link_target_index = target_index;
     inode->creation_date = time(NULL);
@@ -959,7 +972,7 @@ int createSymlink(int parent_inode, int target_index, const char *link_name, ino
     inode->owner[MAX_NAMESIZE-1] = '\0';
     inode->permissions = inode_table[target_index].permissions;
 
-    if (dirAddEntry(parent_inode, link_name, type, inode_index) != 0){
+    if (dirAddEntry(parent_inode, link_name, FILE_SYMLINK, inode_index) != 0){
         freeInode(inode_index);
         return -1;
     }
@@ -1116,7 +1129,7 @@ int cmd_ln_s(int current_inode, const char *target_path, const char *target_name
     if (resolvePath(link_path, current_inode, &link_dir) != 0) return -1;
 
     inode_t *inode = &inode_table[target_inode];
-    return createSymlink(link_dir, target_inode, link_name, inode->type, user);
+    return createSymlink(link_dir, target_inode, link_name, user);
 }
 
 

@@ -38,6 +38,7 @@ typedef struct {
 typedef enum {
     FILE_REGULAR,
     FILE_DIRECTORY,
+    FILE_SYMLINK,
     FILE_ANY
 } inode_type_t;
 typedef enum {
@@ -124,7 +125,7 @@ int readContentFromFile(int parent_inode, const char *name, char *buffer, size_t
 
 int resolvePath(const char *path, int current_inode, int *inode_out);
 
-int createSymlink(int parent_inode, int target_index, const char *link_name, inode_type_t type, const char *user);
+int createSymlink(int parent_inode, int target_index, const char *link_name, const char *user);
 
 // IMPLEMENTAR ESSAS
 // escolher um para implementar, criar branch a partir da develop com o nome da funcao que pretende implementar (ex: cd_branch)
