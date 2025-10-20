@@ -74,6 +74,14 @@ int main() {
         else if (strcmp(cmd, "ls") == 0) {
             cmd_ls(current_inode, ".");
         }
+        else if (strcmp(cmd, "rm") == 0 && arg1) {
+            if (arg1 == "-r" && arg2) {
+                cmd_rm(current_inode, arg2, 1, user);
+            } 
+            else {
+                cmd_rm(current_inode, arg1, 0, user);
+            }
+        }
         else if (strcmp(cmd, "cp") == 0 && arg1 && arg2 && arg3) {
             cmd_cp(current_inode, ".", arg1, ".", arg2, user);
         }
@@ -92,3 +100,4 @@ int main() {
     unmount_fs();
     return 0;
 }
+
