@@ -1172,46 +1172,47 @@ int cmd_ls(int current_inode, const char *path, const char *user) {
         return -1;
     }
 
-    printf("Conteúdo de %s:\n", path && strlen(path) ? path : ".");
-    printf("-----------------------------------\n");
+    while (1)
+    {
+        for (int i = 0; i < BLOCKS_PER_INODE; i++) {
+            if (dir_inode->blocks[i] == 0) continue;
 
-    // percorre blocos do diretório
-    for (int i = 0; i < BLOCKS_PER_INODE; i++) {
-        if (dir_inode->blocks[i] == 0) continue;
+            dir_entry_t *entries = malloc(BLOCK_SIZE);
+            if (!entries) return -1;
 
-        dir_entry_t *entries = malloc(BLOCK_SIZE);
-        if (!entries) return -1;
-
-        if (readBlock(dir_inode->blocks[i], entries) != 0) {
-            free(entries);
-            return -1;
-        }
-
-        int entries_per_block = BLOCK_SIZE / sizeof(dir_entry_t);
-        for (int j = 0; j < entries_per_block; j++) {
-            if (entries[j].inode_index == 0)
-                continue;
-
-            inode_t *entry_inode = &inode_table[entries[j].inode_index];
-
-            char type_char;
-            switch (entry_inode->type) {
-                case FILE_DIRECTORY: type_char = 'd'; break;
-                case FILE_REGULAR:   type_char = '-'; break;
-                case FILE_SYMLINK:   type_char = 'l'; break;
-                default:             type_char = '?'; break;
+            if (readBlock(dir_inode->blocks[i], entries) != 0) {
+                free(entries);
+                return -1;
             }
 
-            printf("%c %-20s %8u bytes\n", 
-                   type_char, 
-                   entries[j].name, 
-                   entry_inode->size);
+            int entries_per_block = BLOCK_SIZE / sizeof(dir_entry_t);
+            for (int j = 0; j < entries_per_block; j++) {
+                if (entries[j].inode_index == 0)
+                    continue;
+
+                inode_t *entry_inode = &inode_table[entries[j].inode_index];
+
+                char type_char;
+                switch (entry_inode->type) {
+                    case FILE_DIRECTORY: type_char = 'd'; break;
+                    case FILE_REGULAR:   type_char = '-'; break;
+                    case FILE_SYMLINK:   type_char = 'l'; break;
+                    default:             type_char = '?'; break;
+                }
+
+                printf("%c %-20s %8u bytes\n", 
+                    type_char, 
+                    entries[j].name, 
+                    entry_inode->size);
+            }
+
+            free(entries);
         }
-
-        free(entries);
+        if (dir_inode->next_inode != 0) {
+            dir_inode = &inode_table[dir_inode->next_inode];
+        }
+        else break;
     }
-
-    printf("-----------------------------------\n");
     return 0;
 }
 
