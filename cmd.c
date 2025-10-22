@@ -8,7 +8,7 @@
 
 int main() {
     int current_inode = 0; // inode raiz
-    char user[] = "root";  // usuário fixo para testes
+    char user[10] = "root";  // usuário fixo para testes
     char input[MAX_INPUT];
 
     if (access(DISK_NAME, F_OK) == 0) {
@@ -28,7 +28,7 @@ int main() {
     printf("MiniFS Terminal. Digite 'exit' para sair.\n");
 
     while (1) {
-        printf("[%s]> ", inode_table[current_inode].name); 
+        printf("%s@[%s]> ", user, inode_table[current_inode].name); 
         if (!fgets(input, MAX_INPUT, stdin)) break;
 
         // Remove \n final
@@ -101,6 +101,9 @@ int main() {
         }
         else if (strcmp(cmd, "ln") == 0 && arg1 && strcmp(arg1, "-s") == 0 && arg2 && arg3) {
             cmd_ln_s(current_inode, arg2, arg3, user);
+        }
+        else if (strcmp(cmd, "su") == 0 && arg1){
+            strncpy(user, arg1, 10);
         }
         else {
             printf("Comando não reconhecido\n");
