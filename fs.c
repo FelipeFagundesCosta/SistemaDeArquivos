@@ -658,7 +658,6 @@ int deleteDirectory(int parent_inode, const char *name, const char *user){
     int target_inode;
     if (dirFindEntry(parent_inode, name, FILE_DIRECTORY, &target_inode) != 0) return -1;
 
-    if (parent_inode == ROOT_INODE) return -1;
     inode_t *inode = &inode_table[target_inode];
     if (!hasPermission(inode, user, PERM_WRITE)) return -1;
 
@@ -1484,30 +1483,7 @@ int cmd_remove(int current_inode, const char *filepath, const char *user, int re
     char name[MAX_NAMESIZE];
 
     // Encontra a última barra para separar caminho/nome
-    char *last_slash = strrchr(path_copy, '/');
-    if (!last_slash) {
-        // caso n tenha barra é o diretorio atual
-        strncpy(parent_path, ".", sizeof(parent_path) - 1);
-        parent_path[sizeof(parent_path) - 1] = '\0';
-        strncpy(name, path_copy, sizeof(name) - 1);
-        name[sizeof(name) - 1] = '\0';
-    } else {
-        // Extrai o nome apos a última barra
-        strncpy(name, last_slash + 1, sizeof(name) - 1);
-        name[sizeof(name) - 1] = '\0';
-
-        // Se a barra for a primeira posição, o pai é raiz "~"
-        if (last_slash == path_copy) {
-            strncpy(parent_path, "~", sizeof(parent_path) - 1);
-            parent_path[sizeof(parent_path) - 1] = '\0';
-        } else {
-            // Caso contrário copia a parte anterior como parent_path
-            size_t len = last_slash - path_copy;
-            if (len >= sizeof(parent_path)) return -1;
-            strncpy(parent_path, path_copy, len);
-            parent_path[len] = '\0';
-        }
-    }
+    splitPath(filepath, parent_path, name);
     
     // resolve o inode do diretorio pai
     int parent_inode;
