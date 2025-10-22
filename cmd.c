@@ -78,7 +78,7 @@ int main() {
                     printf("%d", cmd_echo_arrow_arrow(current_inode, filename, content, user));
                 }
             } else {
-                printf("Uso: echo arquivo >|>> conteudo\n");
+                printf("Falha: echo conteudo >|>> arquivo\n");
             }
             
         }
