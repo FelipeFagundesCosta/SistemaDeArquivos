@@ -41,8 +41,8 @@ int main() {
         char *cmd = strtok(input, " ");
         char *arg1 = strtok(NULL, " ");
         char *arg2 = strtok(NULL, " ");
-        char *arg3 = strtok(NULL, " ");
-        char *arg4 = strtok(NULL, " ");
+        char *arg3 = strtok(NULL, "");
+        //char *arg4 = strtok(NULL, " ");
 
         if (!cmd) continue;
         
@@ -100,7 +100,7 @@ int main() {
             cmd_mv(current_inode, ".", arg1, ".", arg2, user);
         }
         else if (strcmp(cmd, "ln") == 0 && arg1 && strcmp(arg1, "-s") == 0 && arg2 && arg3) {
-            cmd_ln_s(current_inode, ".", arg2, ".", arg3, user);
+            cmd_ln_s(current_inode, arg2, arg3, user);
         }
         else {
             printf("Comando não reconhecido\n");

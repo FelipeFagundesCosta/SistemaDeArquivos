@@ -101,6 +101,7 @@ int init_fs(void) {
     inode_table[root_inode].size = 0;
     inode_table[root_inode].creation_date = time(NULL);
     inode_table[root_inode].modification_date = time(NULL);
+    inode_table[root_inode].permissions = PERM_ALL;
     strcpy(inode_table[root_inode].name, "~");
     strcpy(inode_table[root_inode].owner, "root");
     dirAddEntry(ROOT_INODE, ".", FILE_DIRECTORY, ROOT_INODE);
@@ -1354,36 +1355,37 @@ int cmd_mv(int current_inode, const char *src_path, const char *src_name,
 
 // ln -s (symlink)
 int cmd_ln_s(int current_inode,
-             const char *target_path, const char *target_name,
-             const char *link_path, const char *link_name,
+             const char *target_path,
+             const char *link_path,
              const char *user) {
-    if (!target_path || !target_name || !link_path || !link_name || !user)
+    if (!target_path || !link_path || !user)
         return -1;
 
-    // --- 1. Resolve diretório e inode do alvo ---
-    int target_dir;
-    if (resolvePath(target_path, current_inode, &target_dir) != 0)
-        return -1;
+    int target_index;
+    if (resolvePath(target_path, current_inode, &target_index) != 0) return -1;
+    
 
-    int target_inode;
-    if (dirFindEntry(target_dir, target_name, FILE_ANY, &target_inode) != 0)
-        return -1;
+
+    char link_dir[256];
+    char link_name[256];
+    splitPath(link_path, link_dir, link_name);
+
+    int link_dir_index;
 
     // --- 2. Garante que o diretório do link exista ---
     // Tenta resolver o link_path normalmente
-    int link_dir;
-    if (resolvePath(link_path, current_inode, &link_dir) != 0) {
+    if (resolvePath(link_dir, current_inode, &link_dir_index) != 0) {
         // Se falhar, cria diretórios recursivamente
-        if (createDirectoriesRecursively(link_path, current_inode, user) != 0)
+        if (createDirectoriesRecursively(link_dir, current_inode, user) != 0)
             return -1;
 
         // Tenta resolver novamente agora que o caminho existe
-        if (resolvePath(link_path, current_inode, &link_dir) != 0)
+        if (resolvePath(link_dir, current_inode, &link_dir_index) != 0)
             return -1;
     }
 
     // --- 3. Cria o link simbólico ---
-    return createSymlink(link_dir, target_inode, link_name, user);
+    createSymlink(link_dir_index, target_index, link_name, user);
 }
 
 

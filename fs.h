@@ -145,8 +145,7 @@ int cmd_cp(int current_inode, const char *src_path, const char *src_name,
            const char *dst_path, const char *dst_name, const char *user);
 int cmd_mv(int current_inode, const char *src_path, const char *src_name,
            const char *dst_path, const char *dst_name, const char *user);
-int cmd_ln_s(int current_inode, const char *target_path, const char *target_name,
-             const char *link_path, const char *link_name, const char *user);
+int cmd_ln_s(int current_inode, const char *target_path, const char *link_path, const char *user);
 int cmd_ls(int current_inode, const char *path, const char *user, int info_args);
 int cmd_rm(int current_inode, const char *filepath, const char *user);
 int cmd_rmdir(int current_inode, const char *filepath, const char *user);
