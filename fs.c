@@ -335,6 +335,9 @@ int allocateInode(void) {
 }
 
 void freeInode(int inode_index) {
+    if (inode_table[inode_index].next_inode){
+        freeInode(inode_table[inode_index].next_inode);
+    }
     if (inode_index >= 0 && inode_index < MAX_INODES){
         uint32_t byte = inode_index / 8;
         uint8_t bit = inode_index % 8;
@@ -816,65 +819,109 @@ fs_dir_list_t listElements(int parent_inode) {
     return result;
 }
 
-int addContentToInode(int inode_number, const char *data, size_t data_size, const char *user) {
+int addContentToInode(int inode_index, const char *data, size_t data_size, const char *user) {
     if (!data || !user) return -1;
+    if (inode_index < 0 || inode_index >= MAX_INODES) return -1;
 
-    inode_t *inode = &inode_table[inode_number];
+    inode_t *inode = &inode_table[inode_index];
 
     // Permissão de escrita
     if (!hasPermission(inode, user, PERM_WRITE)) return -1;
 
-    size_t offset = inode->size; // onde começar a escrever
     size_t written = 0;
-    inode_t *current = inode;
 
     // Vai até o último inode encadeado
+    inode_t *current = inode;
+    int current_idx = inode_index;
     while (current->next_inode != 0) {
-        current = &inode_table[current->next_inode];
+        current_idx = current->next_inode;
+        current = &inode_table[current_idx];
     }
 
-    while (written < data_size) {
-        // Procura por um bloco vazio ou parcialmente usado
-        int block_idx = -1;
-        for (int i = 0; i < BLOCKS_PER_INODE; i++) {
-            if (current->blocks[i] == 0) {
-                block_idx = i;
-                break;
-            }
+    // Determina onde está o último bloco parcialmente preenchido (se existir)
+    int last_block_slot = -1;
+    for (int i = BLOCKS_PER_INODE - 1; i >= 0; --i) {
+        if (current->blocks[i] != 0) {
+            last_block_slot = i;
+            break;
         }
+    }
 
-        // Se não houver bloco disponível, criar novo inode
-        if (block_idx == -1) {
-            int new_inode = allocateInode();
-            if (new_inode < 0) return -1; // sem inodes disponíveis
-            current->next_inode = new_inode;
-            current = &inode_table[new_inode];
-            block_idx = 0;
-        }
+    size_t file_offset = inode->size;
+    size_t inner_offset = file_offset % BLOCK_SIZE;
 
-        // Aloca novo bloco se necessário
-        if (current->blocks[block_idx] == 0) {
-            int new_block = allocateBlock();
-            if (new_block <= 0) return -1; // sem blocos disponíveis
-            current->blocks[block_idx] = new_block;
-        }
+    // Se não há nenhum bloco no inode atual, ou último bloco está cheio -> precisamos criar novo bloco
+    if (last_block_slot == -1 || (inner_offset == 0 && inode->size != 0)) {
+        last_block_slot = -1; // forçar alocação abaixo
+        inner_offset = 0;
+    }
 
-        // Escreve no bloco
-        char block_buffer[BLOCK_SIZE] = {0};
-        size_t to_write = BLOCK_SIZE;
-        if (data_size - written < to_write) to_write = data_size - written;
+    // --- Preencha bloco parcialmente usado (se houver) ---
+    if (last_block_slot != -1 && inner_offset > 0) {
+        uint32_t block_num = current->blocks[last_block_slot];
+        char block_buffer[BLOCK_SIZE];
 
-        memcpy(block_buffer, data + written, to_write);
-        if (writeBlock(current->blocks[block_idx], block_buffer) != 0) return -1;
+        if (readBlock(block_num, block_buffer) != 0) return -1;
+
+        size_t can_write = BLOCK_SIZE - inner_offset;
+        size_t to_write = (data_size - written < can_write) ? (data_size - written) : can_write;
+
+        memcpy(block_buffer + inner_offset, data + written, to_write);
+
+        if (writeBlock(block_num, block_buffer) != 0) return -1;
 
         written += to_write;
-        offset += to_write;
+        file_offset += to_write;
+        inner_offset = file_offset % BLOCK_SIZE;
     }
 
-    inode->size = offset; // atualiza tamanho do arquivo
-    sync_fs();
-    return 0;
+    // --- Agora escreva blocos completos / novos --- 
+    while (written < data_size) {
+        // encontra slot de bloco livre no inode atual
+        int slot = -1;
+        for (int i = 0; i < BLOCKS_PER_INODE; ++i) {
+            if (current->blocks[i] == 0) { slot = i; break; }
+        }
+
+        // se inode atual cheio, alocar novo inode e usar seu slot 0
+        if (slot == -1) {
+            int new_inode_idx = allocateInode();
+            if (new_inode_idx < 0) return -1;
+            current->next_inode = new_inode_idx;
+            current = &inode_table[new_inode_idx];
+            current_idx = new_inode_idx;
+            // garantir tipo do inode encadeado (arquivo regular)
+            current->type = FILE_REGULAR;
+            slot = 0;
+        }
+
+        // aloca bloco para esse slot
+        if (current->blocks[slot] == 0) {
+            int new_block = allocateBlock();
+            if (new_block < 0) return -1;
+            current->blocks[slot] = new_block;
+        }
+
+        // escrever até encher o bloco (ou o que sobrar)
+        size_t to_write = (data_size - written >= BLOCK_SIZE) ? BLOCK_SIZE : (data_size - written);
+        char block_buffer[BLOCK_SIZE] = {0};
+        // se estiver escrevendo menos que um bloco completo, copiamos só os bytes a escrever
+        memcpy(block_buffer, data + written, to_write);
+
+        if (writeBlock(current->blocks[slot], block_buffer) != 0) return -1;
+
+        written += to_write;
+        file_offset += to_write;
+    }
+
+    // atualiza metadados do inode raiz (tamanho e timestamp)
+    inode->size = file_offset;
+    inode->modification_date = time(NULL);
+
+    // persiste mudanças
+    return sync_fs();
 }
+
 
 
 ssize_t getFileSize(int parent_inode, const char *name) {
@@ -950,7 +997,7 @@ int resolvePath(const char *path, int current_inode, int *inode_out) {
         path++; // pula o '~'
         if (*path == '/') path++; // pula barra inicial
     }
-
+    
     char token[256];
     const char *p = path;
     while (*p) {
@@ -1165,7 +1212,8 @@ int cmd_echo_arrow(int current_inode, const char *full_path, const char *content
     }
 
     inode_t *inode = &inode_table[inode_index];
-    inode->size = 0;
+    inode->size = 0;  
+    if (inode->next_inode) freeInode(inode->next_inode);
     inode->next_inode = 0;
     for (int i = 0; i < BLOCKS_PER_INODE; i++) inode->blocks[i] = 0;
 
@@ -1199,7 +1247,6 @@ int cmd_echo_arrow_arrow(int current_inode, const char *full_path, const char *c
 // cat
 int cmd_cat(int current_inode, const char *path, const char *user) {
     if (!path || !user) return -1;
-
     // resolve o inode do arquivo
     int target_inode;
     if (resolvePath(path, current_inode, &target_inode) != 0)

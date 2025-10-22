@@ -66,16 +66,16 @@ int main() {
             cmd_rmdir(current_inode, arg1, user);
         }
         else if (strcmp(cmd, "echo") == 0 && arg1) {
-            char *filename = arg1;
+            char *content = arg1;
             char *redir = arg2; // > ou >>
-            char *content = arg3;
+            char *filename = arg3;
 
             if (redir && filename && content) {
                 if (strcmp(redir, ">") == 0) {
                     cmd_echo_arrow(current_inode, filename, content, user);
                 }
                 else if (strcmp(redir, ">>") == 0) {
-                    cmd_echo_arrow_arrow(current_inode, filename, content, user);
+                    printf("%d", cmd_echo_arrow_arrow(current_inode, filename, content, user));
                 }
             } else {
                 printf("Uso: echo arquivo >|>> conteudo\n");
