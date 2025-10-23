@@ -1,138 +1,179 @@
 # Sistema de Arquivos Baseado em I-nodes
 
 ## Objetivo
-Desenvolver um sistema de arquivos persistente que simule operações típicas de UNIX (`touch`, `mkdir`, `ls`, `cat`, etc.), utilizando i-nodes e um disco virtual armazenado em arquivo binário (`disk.dat`).
+Desenvolver um sistema de arquivos persistente que simule operações típicas de UNIX (touch, mkdir, ls, cat, etc.), utilizando i-nodes e um disco virtual armazenado em arquivo binário (disk.dat).
 
 ---
+
+## Como Executar
+
+1.  *Clone e acesse o repositório:*
+    ```
+    git clone https://github.com/FelipeFagundesCosta/SistemaDeArquivos
+    cd SistemaDeArquivos
+    ```
+
+    
+
+3.  *Compile no Terminal Linux:*
+    ```
+    gcc cmd.c fs.c -o cmd
+    ```
+    
+
+4.  *Execute o programa principal:*
+    ```
+    ./cmd
+    ```
+    
+5.  *Execute os comandos após a criação de seu disco:*
+    
+    - Na primeira execução, o programa criará automaticamente um arquivo de disco (disk.dat).
+
+    - Nas execuções seguintes, ele montará o disco existente.
+
+    - Você pode agora usar os comandos do sistema de arquivos (lista com comandos já implementados na seção [Comandos Implementados](#comandos)).
+
+---
+    
 
 ## Estrutura do Projeto
 
-meufs/
+SistemaDeArquivos/
+
 │
+
 ├── fs.h # Cabeçalho: structs e protótipos
+
 ├── fs.c # Implementação das funções do sistema de arquivos
-└── main.c # Ponto de entrada do programa
 
-
----
-
-## Checkpoints de Desenvolvimento
-
-### ✅ Etapa 1 – Criar disco virtual
-- [x] Criar arquivo `disk.dat` com 64 MB
-- [x] Inicializar função `init_fs()` em `fs.c`
-- [x] Chamar `init_fs()` em `main.c` e validar retorno
-
-**Objetivo**: Ter um disco virtual criado e acessível.
+└── cmd.c # Ponto de entrada do programa
 
 ---
+<a id="comandos"></a>
+## Comandos Implementados
 
-### ✅ Etapa 2 – Definir e gravar superbloco
-- [x] Criar `superblock_t` em `fs.h`
-- [x] Inicializar valores (`magic`, `disk_size`, `block_size`)
-- [x] Gravar superbloco no início do disco (`fwrite`)
+O sistema de arquivos suporta os seguintes comandos:
 
-**Objetivo**: Disco formatado com metadados iniciais.
+### cd [diretório]
 
----
+Muda o diretório atual para o especificado.
+Exemplo:
+```
+cd /home/user/docs
+```
+### mkdir [diretório]
 
-### ⏳ Etapa 3 – Implementar bitmaps
-- Criar bitmap de blocos (1 bit = bloco livre/ocupado)
-- Criar bitmap de i-nodes (1 bit = i-node livre/ocupado)
-- Inicializar ambos no disco após o superbloco
-- Funções auxiliares:
-  - `allocate_block()`
-  - `free_block()`
-  - `allocate_inode()`
-  - `free_inode()`
+Cria um novo diretório. Suporta criação recursiva de caminhos.
+Exemplo:
+```
+mkdir /home/user/docs/projetos
+```
+### touch [arquivo]
 
-**Objetivo**: Gerenciar alocação de blocos e i-nodes de forma persistente.
+Cria um novo arquivo vazio. Também cria diretórios necessários caso não existam.
+Exemplo:
+```
+touch /home/user/docs/arquivo.txt
+```
+### rm [arquivo]
 
----
+Remove um arquivo do sistema. Não funciona para diretórios.
+Exemplo:
+```
+rm /home/user/docs/arquivo.txt
+```
+### rmdir [diretório]
 
-### ⏳ Etapa 4 – Definir estrutura de i-node
-- Estrutura `inode_t` com:
-  - Nome do arquivo/diretório
-  - Dono / Criador
-  - Tamanho do arquivo
-  - Data de criação/modificação
-  - Permissões
-  - Apontadores para blocos de dados
-  - Apontador para i-node extra (se necessário)
-- Reservar espaço para tabela de i-nodes no disco
-- Funções auxiliares para ler/escrever i-nodes
+Remove um diretório vazio. Não remove arquivos dentro dele.
+Exemplo:
+```
+rmdir /home/user/docs/antigo
+```
+### clear
 
-**Objetivo**: Representar arquivos e diretórios no FS.
+Limpa o terminal.
+Exemplo:
+```
+clear
+```
+### echo [conteúdo] > [arquivo]
 
----
+Sobrescreve o conteúdo de um arquivo com o texto fornecido. Cria o arquivo se não existir.
+Exemplo:
+```
+echo "Olá mundo" > /home/user/docs/ola.txt
+```
+### echo [conteúdo] >> [arquivo]
 
-### ⏳ Etapa 5 – Criar operações de arquivos
-- `touch arquivo`
-- `rm arquivo`
-- `echo "conteúdo" > arquivo`
-- `echo "conteúdo" >> arquivo`
-- `cat arquivo`
-- `cp arquivo1 arquivo2`
-- `mv arquivo1 arquivo2`
-- `ln -s arquivoOriginal link`
+Anexa conteúdo ao final de um arquivo existente. Cria o arquivo se não existir.
+Exemplo:
+```
+echo "Segunda linha" >> /home/user/docs/ola.txt
+```
+### cat [arquivo]
 
-**Objetivo**: Manipular arquivos usando i-nodes e blocos de dados.
+Exibe o conteúdo de um arquivo.
+Exemplo:
+```
+cat /home/user/docs/ola.txt
+```
+### ls [opções] [diretório]
 
----
+Lista o conteúdo de um diretório.
 
-### ⏳ Etapa 6 – Criar operações de diretórios
-- `mkdir diretorio`
-- `rmdir diretorio`
-- `ls diretorio`
-- `cd diretorio`
-- `mv diretorio1 diretorio2`
-- `ln -s diretorioOriginal link`
+-l mostra informações detalhadas (permissões, proprietário, tamanho, data).
+Exemplo:
+```
+ls
+ls -l /home/user/docs
+```
+### cp [arquivo_origem] [arquivo_destino]
 
-**Objetivo**: Manipular hierarquia de diretórios com links simbólicos.
+Copia um arquivo para outro caminho ou nome.
+Exemplo:
+```
+cp arquivo.txt copia_arquivo.txt
+```
+### mv [arquivo_origem] [arquivo_destino]
 
----
+Move ou renomeia um arquivo.
+Exemplo:
+```
+mv arquivo.txt antigo_arquivo.txt
+```
+### ln -s [arquivo_alvo] [link]
 
-### ⏳ Etapa 7 – Caminhos absolutos e relativos
-- Implementar interpretação de caminhos:
-  - Absolutos (`/home/user/file.txt`)
-  - Relativos (`../arquivo.txt`)
-- Implementar diretórios especiais:
-  - `.` (diretório atual)
-  - `..` (diretório pai)
+Cria um link simbólico apontando para outro arquivo ou diretório.
+Exemplo:
+```
+ln -s /home/user/docs/arquivo.txt link_para_arquivo.txt
+```
+### su [usuário]
 
-**Objetivo**: Navegação completa no FS.
+Muda o usuário atual do sistema de arquivos.
+Exemplo:
+```
+su novouser
+```
+### unlink [link]
 
----
+Remove um link simbólico.
+Exemplo:
+```
+unlink link_para_arquivo.txt
+```
+### df
 
-### ⏳ Etapa 8 – Persistência total
-- Garantir que todas as alterações em arquivos e diretórios sejam gravadas no disco
-- Implementar função `mount_fs()` para ler superbloco, bitmaps e tabela de i-nodes ao iniciar o programa
-- Função `unmount_fs()` opcional para sincronizar dados antes de encerrar
+Exibe informações sobre o uso do sistema de arquivos (número de blocos, usados, disponíveis, percentual).
+Exemplo:
+```
+df
+```
 
-**Objetivo**: Sistema de arquivos persistente entre execuções.
-
----
-
-### ⏳ Etapa 9 – Testes finais e documentação
-- Criar scripts de teste para cada comando
-- Documentar todas as funções no código (`Doxygen` style opcional)
-- Instruções de uso no README
-
-**Objetivo**: Projeto completo, testado e documentado.
-
----
-
-## ⚡ Dicas de Implementação
-- Sempre atualizar bitmaps ao alocar/liberar blocos e i-nodes
-- Cada i-node pode ter múltiplos blocos, use ponteiros diretos e indiretos se necessário
-- Comece pelas operações mais simples (`touch`, `mkdir`) e evolua
-- Teste cada passo antes de passar para o próximo
-
----
-
-## 📌 Resultado Final Esperado
+## Resultado Final 
 Um programa em C capaz de:
-- Criar e formatar um disco virtual
+- Criar e montar um disco virtual
 - Manipular arquivos e diretórios usando i-nodes
 - Persistir todas as alterações
 - Interpretar caminhos absolutos e relativos
