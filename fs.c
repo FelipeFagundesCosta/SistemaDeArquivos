@@ -768,7 +768,7 @@ int deleteDirectory(int parent_inode, const char *name, const char *user){
                     return -1; // diretorio nao vazio
             }
         }
-        free(entries);
+        free(raw);
     }
 
     if (dirRemoveEntry(parent_inode, name, FILE_DIRECTORY) != 0) return -1;
