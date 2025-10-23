@@ -225,6 +225,7 @@ int unmount_fs(void) {
 }
 
 /* ----- Utilitarios --------*/
+/* Formata timestamp para prints */
 const char *format_time(time_t t, char *buf, size_t buflen) {
     if (!buf || buflen == 0) return NULL;
     struct tm tm;
@@ -236,7 +237,7 @@ const char *format_time(time_t t, char *buf, size_t buflen) {
     return buf;
 }
 
-
+/* Função de debug para visualizar informações de inodes */
 int show_inode_info(int inode_index) {
     if (!inode_table) return -1;
     if (inode_index < 0 || inode_index >= MAX_INODES) return -1;
@@ -287,6 +288,7 @@ int show_inode_info(int inode_index) {
 
 
 /* ---- alocação ---- */
+/* Aloca novo bloco */
 int allocateBlock(void) {
     for (uint32_t i = 0; i < computed_data_blocks; i++){
         uint32_t byte = i / 8;
@@ -300,6 +302,7 @@ int allocateBlock(void) {
     return -1;
 }
 
+/* Libera bloco existente */
 void freeBlock(int block_index) {
     if (block_index >= 0 && block_index < (int)computed_data_blocks) {
         uint32_t byte = block_index / 8;
@@ -308,6 +311,7 @@ void freeBlock(int block_index) {
     }
 }
 
+/* Aoca novo inode */
 int allocateInode(void) {
     for (uint32_t i = 0; i < MAX_INODES; i++) {
         uint32_t byte = i / 8;
@@ -323,6 +327,7 @@ int allocateInode(void) {
     return -1;
 }
 
+/* Libera inode existent */
 void freeInode(int inode_index) {
     if (inode_table[inode_index].next_inode){
         freeInode(inode_table[inode_index].next_inode);
@@ -338,6 +343,7 @@ void freeInode(int inode_index) {
 }
 
 /* ---- leitura e escrita ---- */
+/* Le bloco */
 int readBlock(uint32_t block_index, void *buffer){
     if (!disk || block_index >= computed_data_blocks) return -1;
     off_t offset = off_data_region + (off_t)block_index * BLOCK_SIZE;
@@ -346,6 +352,7 @@ int readBlock(uint32_t block_index, void *buffer){
     return (read_bytes == BLOCK_SIZE) ? 0 : -1;
 }
 
+/* Escreve bloco */
 int writeBlock(uint32_t block_index, const void *buffer){
     if (!disk || block_index >= computed_data_blocks) return -1;
     off_t offset = off_data_region + (off_t)block_index * BLOCK_SIZE;
@@ -357,6 +364,7 @@ int writeBlock(uint32_t block_index, const void *buffer){
 }
 
 /* ---- diretórios ---- */
+/* Tenta encontrar elemento em um diretório */
 int dirFindEntry(int dir_inode, const char *name, inode_type_t type, int *out_inode) {
     if (dir_inode < 0 || dir_inode >= MAX_INODES || !name || !out_inode) 
         return -1;
@@ -395,10 +403,8 @@ int dirFindEntry(int dir_inode, const char *name, inode_type_t type, int *out_in
                     return 0;
                 }
             }
-
             free(buffer);
         }
-
         if (dir->next_inode == 0)
             break;
 
@@ -408,7 +414,7 @@ int dirFindEntry(int dir_inode, const char *name, inode_type_t type, int *out_in
     return -1;
 }
 
-
+/* Adiciona elemento a um diretorio */
 int dirAddEntry(int dir_inode, const char *name, inode_type_t type, int inode_index) {
     if (dir_inode < 0 || dir_inode >= MAX_INODES || !name)
         return -1;
@@ -519,9 +525,7 @@ int dirAddEntry(int dir_inode, const char *name, inode_type_t type, int inode_in
     return -1;
 }
 
-
-
-
+/* Remove elemento de um diretorio */
 int dirRemoveEntry(int dir_inode, const char *name, inode_type_t type) {
     if (dir_inode < 0 || dir_inode >= MAX_INODES || !name)
         return -1;
@@ -587,7 +591,7 @@ int dirRemoveEntry(int dir_inode, const char *name, inode_type_t type) {
     return -1;
 }
 
-
+/* Verifica permissoes */
 int hasPermission(const inode_t *inode, const char *username, permission_t perm) {
     if (strcmp(inode->owner, username) == 0) {
         return ((inode->permissions >> 6) & PERM_RWX) & perm;
@@ -596,7 +600,7 @@ int hasPermission(const inode_t *inode, const char *username, permission_t perm)
     }
 }
 
-
+/* Cria diretorio */
 int createDirectory(int parent_inode, const char *name, const char *user){
     if (parent_inode < 0 || parent_inode >= MAX_INODES || !name || !user) return -1;
     int dummy_output;
@@ -645,6 +649,7 @@ int createDirectory(int parent_inode, const char *name, const char *user){
     return 0;
 }
 
+/* Cria diretorios recursivamente s*/
 int createDirectoriesRecursively(const char *path, int current_inode, const char *user) {
     if (!path || !user) return -1;
     if (path[0] == '\0') return -1;
@@ -703,6 +708,7 @@ int createDirectoriesRecursively(const char *path, int current_inode, const char
     return 0;
 }
 
+/* Deleta diretorio existente */
 int deleteDirectory(int parent_inode, const char *name, const char *user){
     if (parent_inode < 0 || parent_inode >= MAX_INODES || !name) return -1;
     int target_inode;
@@ -734,6 +740,7 @@ int deleteDirectory(int parent_inode, const char *name, const char *user){
 
 }
 
+/* Cria arquivo */
 int createFile(int parent_inode, const char *name, const char *user){
     if (parent_inode < 0 || parent_inode >= MAX_INODES || !name) return -1;
     int dummy_output;
@@ -768,6 +775,7 @@ int createFile(int parent_inode, const char *name, const char *user){
     return 0;
 }
 
+/* Deleta arquivo */
 int deleteFile(int parent_inode, const char *name, const char *user){
     if (parent_inode < 0 || parent_inode >= MAX_INODES || !name) return -1;
     int target_inode;
@@ -789,7 +797,7 @@ int deleteFile(int parent_inode, const char *name, const char *user){
     return 0;
 }
 
-
+/* Adiciona conteudo a um inode */
 int addContentToInode(int inode_index, const char *data, size_t data_size, const char *user) {
     if (!data || !user) return -1;
     if (inode_index < 0 || inode_index >= MAX_INODES) return -1;
@@ -893,6 +901,7 @@ int addContentToInode(int inode_index, const char *data, size_t data_size, const
     return sync_fs();
 }
 
+/* Le conteudo de um inode */
 int readContentFromInode(int inode_number, char *buffer, size_t buffer_size, size_t *out_bytes, const char *user) {
     if (!buffer || !out_bytes || !user) return -1;
 
@@ -944,7 +953,7 @@ int readContentFromInode(int inode_number, char *buffer, size_t buffer_size, siz
     return 0;
 }
 
-
+/* Cria link simbolico */
 int createSymlink(int parent_inode, int target_index, const char *link_name, const char *user) {
     // 1. Verifica se link_name já existe
     int dummy_output;
@@ -982,6 +991,7 @@ int createSymlink(int parent_inode, int target_index, const char *link_name, con
     return 0;
 }
 
+/* Encontra inode a partir de um path */
 int resolvePath(const char *path, int current_inode, int *inode_out) {
     if (!path || !inode_out) return -1;
 
@@ -1030,7 +1040,7 @@ int resolvePath(const char *path, int current_inode, int *inode_out) {
     return 0;
 }
 
-// Função auxiliar para separar caminho e último segmento
+/* Separa path entre caminho do pai e o nome do arquivo */
 static void splitPath(const char *full_path, char *dir_path, char *base_name) {
     const char *last_slash = strrchr(full_path, '/');
     if (last_slash) {
@@ -1047,7 +1057,7 @@ static void splitPath(const char *full_path, char *dir_path, char *base_name) {
 
 /* ---- Comandos de FS ---- */
 
-// cd
+// cd (muda diretorio)
 int cmd_cd(int *current_inode, const char *path) {
     if (!current_inode || !path) return -1;
 
@@ -1061,7 +1071,7 @@ int cmd_cd(int *current_inode, const char *path) {
     return 0;
 }
 
-// mkdir com criação recursiva (estilo cp)
+// mkdir (cria diretorio) com criação recursiva
 int cmd_mkdir(int current_inode, const char *full_path, const char *user) {
     if (!full_path || !user) return -1;
 
@@ -1077,7 +1087,7 @@ int cmd_mkdir(int current_inode, const char *full_path, const char *user) {
     return createDirectory(parent_inode, name, user);
 }
 
-// touch com criação recursiva
+// touch (cria arquivo) com criação recursiva
 int cmd_touch(int current_inode, const char *full_path, const char *user) {
     if (!full_path || !user) return -1;
 
@@ -1145,7 +1155,7 @@ int cmd_echo_arrow_arrow(int current_inode, const char *full_path, const char *c
 }
 
 
-// cat
+// cat (le conteudo de arquivo)
 int cmd_cat(int current_inode, const char *path, const char *user) {
     if (!path || !user) return -1;
     // resolve o inode do arquivo
@@ -1186,9 +1196,7 @@ int cmd_cat(int current_inode, const char *path, const char *user) {
     return 0;
 }
 
-// Versão robusta de cmd_cp.
-// src_path/dst_path podem ser "." para indicar diretório atual.
-// src_name / dst_name podem conter barras (ex: "subdir/file") — nesse caso a parte de diretório será usada.
+// cp 9copia arquivo) com criaçãp recursiva
 int cmd_cp(int current_inode, const char *src_path, const char *src_name,
            const char *dst_path, const char *dst_name, const char *user) {
     if (!src_name || !dst_name || !user) return -1;
@@ -1300,7 +1308,7 @@ int cmd_mv(int current_inode, const char *src_path, const char *src_name,
 }
 
 
-// ln -s (symlink)
+// ln -s (cria link simbolico)
 int cmd_ln_s(int current_inode,
              const char *target_path,
              const char *link_path,
@@ -1336,7 +1344,7 @@ int cmd_ln_s(int current_inode,
 }
 
 
-// ls
+// ls (lista elementos)
 int cmd_ls(int current_inode, const char *path, const char *user, int info_arg) {
     if (!user) return -1;
 
@@ -1369,6 +1377,12 @@ int cmd_ls(int current_inode, const char *path, const char *user, int info_arg) 
                     continue;
 
                 inode_t *entry_inode = &inode_table[entries[entry_idx].inode_index];
+
+                // Determina tipo de arquivo
+                char type = '-';
+                if (entry_inode->type == FILE_DIRECTORY) type = 'd';
+                else if (entry_inode->type == FILE_REGULAR) type = 'f';
+                else if (entry_inode->type == FILE_SYMLINK) type = 'l';
                 
 
                 // Caso utilize o argumento para emular o ls - l
@@ -1385,11 +1399,6 @@ int cmd_ls(int current_inode, const char *path, const char *user, int info_arg) 
                     char ctime_buf[32], mtime_buf[32];
                     format_time(entry_inode->creation_date, ctime_buf, sizeof(ctime_buf));
                     format_time(entry_inode->modification_date, mtime_buf, sizeof(mtime_buf));
-
-                    // Determina tipo de arquivo
-                    char type = '-';
-                    if (entry_inode->type == FILE_DIRECTORY) type = 'd';
-                    else if (entry_inode->type == FILE_SYMLINK) type = 'l';
 
                     printf("%c%s %8s %8s %8lu %s %s", 
                         type,
@@ -1408,7 +1417,7 @@ int cmd_ls(int current_inode, const char *path, const char *user, int info_arg) 
                     printf("\n");
                 }
                 else {
-                    printf("%s     %s\n", entry_inode->type == FILE_REGULAR? "-f" : "-d", entry_inode->name);
+                    printf("-%c     %s\n", type, entry_inode->name);
                 }
             }
 
@@ -1419,6 +1428,7 @@ int cmd_ls(int current_inode, const char *path, const char *user, int info_arg) 
     return 0;
 }
 
+// remove elementos (usada tanto por rmdir quanto por rm)
 int cmd_remove(int current_inode, const char *filepath, const char *user, int remove_dir) {
     if (!filepath || !user) return -1;
 
@@ -1457,7 +1467,7 @@ int cmd_remove(int current_inode, const char *filepath, const char *user, int re
 
     // Verifica conforme o tipo de rm (e.g. rm ou rmdir)
     if (remove_dir) {
-        if (target->type != FILE_DIRECTORY) {
+        if (target->type != FILE_DIRECTORY && target->type != FILE_SYMLINK) {
             printf("rmdir: não é um diretório: %s\n", filepath);
             return -1;
         }
@@ -1467,7 +1477,7 @@ int cmd_remove(int current_inode, const char *filepath, const char *user, int re
         }
         return 0;
     } else {
-        if (target->type == FILE_DIRECTORY) {
+        if (target->type == FILE_DIRECTORY || target->type == FILE_SYMLINK) {
             printf("rm: não é possível remover '%s': é um diretório\n", filepath);
             return -1;
         }
@@ -1479,10 +1489,12 @@ int cmd_remove(int current_inode, const char *filepath, const char *user, int re
     }
 }
 
+// rm (remove arquivo)
 int cmd_rm(int current_inode, const char *filepath, const char *user) {
     return cmd_remove(current_inode, filepath, user, 0);
 }
 
+// rmdir (remove diretorio)
 int cmd_rmdir(int current_inode, const char *filepath, const char *user) {
     return cmd_remove(current_inode, filepath, user, 1);
 }
