@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <stdlib.h>
+#include <math.h>
 
 /* ---- Variáveis globais ---- */
 unsigned char *block_bitmap = NULL;
@@ -57,14 +58,6 @@ static void compute_layout(void) {
     off_inode_table = off_inode_bitmap + computed_inode_bitmap_bytes;
     off_data_region = off_inode_table + computed_inode_table_bytes;
     off_data_region = ((off_data_region + BLOCK_SIZE - 1) / BLOCK_SIZE) * BLOCK_SIZE;
-}
-
-/* ---- Persiste um inode específico no disco ---- */
-void sync_inode(int inode_num) {
-    if (!disk || !inode_table) return;
-    fseek(disk, off_inode_table + inode_num * sizeof(inode_t), SEEK_SET);
-    fwrite(&inode_table[inode_num], sizeof(inode_t), 1, disk);
-    fflush(disk);
 }
 
 /* ---- Inicializa um novo filesystem ---- */
@@ -231,6 +224,15 @@ int sync_fs(void) {
 
     return 0;
 }
+
+/* ---- Persiste um inode específico no disco ---- */
+void sync_inode(int inode_num) {
+    if (!disk || !inode_table) return;
+    fseek(disk, off_inode_table + inode_num * sizeof(inode_t), SEEK_SET);
+    fwrite(&inode_table[inode_num], sizeof(inode_t), 1, disk);
+    fflush(disk);
+}
+
 
 /* ---- Desmonta FS ---- */
 int unmount_fs(void) {
@@ -1582,5 +1584,27 @@ int cmd_unlink(int current_inode, const char *filepath, const char *user){
             printf("Não foi possível remover '%s'\n", filepath);
             return -1;
         }
+    return 0;
+}
+
+int cmd_df(){
+    int free_blocks = 0;
+
+    for (uint32_t i = 0; i < computed_data_blocks; i++){
+        uint32_t byte = i / 8;
+        uint8_t bit = i % 8;
+
+        if ((block_bitmap[byte] & (1 << bit)) == 0) {
+            free_blocks ++;
+        }
+    }
+
+    int used_blocks = computed_data_blocks - free_blocks;
+    int use_percentage = (used_blocks * 100 + computed_data_blocks -1) / computed_data_blocks;
+
+    printf("Filesystem     N-blocks     Used Available Use%% Mounted on\n");
+    printf("%-14s %-12d %-6d %-5d %3d%%   /~\n",
+           DISK_NAME, computed_data_blocks, used_blocks, free_blocks, use_percentage);
+
     return 0;
 }

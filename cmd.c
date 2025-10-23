@@ -75,7 +75,7 @@ int main() {
                     cmd_echo_arrow(current_inode, filename, content, user);
                 }
                 else if (strcmp(redir, ">>") == 0) {
-                    printf("%d", cmd_echo_arrow_arrow(current_inode, filename, content, user));
+                    cmd_echo_arrow_arrow(current_inode, filename, content, user);
                 }
             } else {
                 printf("Falha: echo conteudo >|>> arquivo\n");
@@ -107,6 +107,9 @@ int main() {
         }
         else if (strcmp(cmd, "unlink") == 0 && arg1){
             cmd_unlink(current_inode, arg1, user);
+        }
+        else if (strcmp(cmd, "df") == 0){
+            cmd_df();
         }
         else {
             printf("Comando não reconhecido\n");

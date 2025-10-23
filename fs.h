@@ -8,6 +8,7 @@
 #include <sys/types.h>
 #include <string.h>
 #include <time.h>
+#include <math.h>
 
 #define DISK_NAME "disk.dat"
 #define FS_MAGIC 0xF5F5F5F5
@@ -91,6 +92,7 @@ typedef struct {
 int init_fs(void);
 int mount_fs(void);
 int sync_fs(void);
+void sync_inode(int inode_num);
 int unmount_fs(void);
 
 /* Utilitarios */
@@ -146,6 +148,7 @@ int cmd_ls(int current_inode, const char *path, const char *user, int info_args)
 int cmd_rm(int current_inode, const char *filepath, const char *user);
 int cmd_rmdir(int current_inode, const char *filepath, const char *user);
 int cmd_unlink(int current_inode, const char *filepath, const char *user);
+int cmd_df(void);
 
 /* Variáveis globais */
 extern unsigned char *block_bitmap;
