@@ -10,6 +10,7 @@
 #include <time.h>
 
 #define DISK_NAME "disk.dat"
+#define FS_MAGIC 0xF5F5F5F5
 #define DISK_SIZE_MB 64
 #define MAX_INODES 128
 #define BLOCK_SIZE 512
@@ -31,9 +32,6 @@ typedef struct {
     uint32_t off_inode_table;
     uint32_t off_data_region;
 } fs_header_t;
-
-#define FS_MAGIC 0xF5F5F5F5
-
 
 typedef enum {
     FILE_REGULAR,

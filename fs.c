@@ -133,7 +133,16 @@ int init_fs(void) {
     fseek(disk, off_inode_table, SEEK_SET);
     fwrite(inode_table, 1, computed_inode_table_bytes, disk);
 
-    printf("[INFO] Filesystem criado com sucesso.\n");
+    printf("[INFO] Filesystem criado com sucesso.\n\n");
+
+    printf("[INFO] Disposição do disco:\n");
+    printf("[INFO]   |--Espaço para cabecalho: %ldB\n", sizeof(fs_header_t));
+    printf("[INFO]   |--Espaço para bitmap de blocos: %ldB\n", computed_block_bitmap_bytes);
+    printf("[INFO]   |--Espaço para bitmap de inodes: %ldB\n", computed_inode_bitmap_bytes);
+    printf("[INFO]   |--Espaço para tabela de inodes: %ldB\n", computed_inode_table_bytes);
+    printf("         |\n");
+    printf("[INFO]   |--Espaço disponivel: %dB\n", computed_data_blocks * BLOCK_SIZE);
+    printf("[INFO]   |--Equivalente a: %d blocos\n\n", computed_data_blocks);
     return 0;
 }
 
@@ -192,7 +201,16 @@ int mount_fs(void) {
     fread(inode_table, 1, computed_inode_table_bytes, disk);
 
 
-    printf("[INFO] Filesystem montado com sucesso!\n");
+    printf("[INFO] Filesystem montado com sucesso!\n\n");
+
+    printf("[INFO] Disposição do disco:\n");
+    printf("[INFO]   |--Espaço para cabecalho: %ldB\n", sizeof(fs_header_t));
+    printf("[INFO]   |--Espaço para bitmap de blocos: %ldB\n", computed_block_bitmap_bytes);
+    printf("[INFO]   |--Espaço para bitmap de inodes: %ldB\n", computed_inode_bitmap_bytes);
+    printf("[INFO]   |--Espaço para tabela de inodes: %ldB\n", computed_inode_table_bytes);
+    printf("         |\n");
+    printf("[INFO]   |--Espaço disponivel: %dB\n", computed_data_blocks * BLOCK_SIZE);
+    printf("[INFO]   |--Equivalente a: %d blocos\n\n", computed_data_blocks);
     return 0;
 }
 
@@ -1445,11 +1463,6 @@ int cmd_ls(int current_inode, const char *path, const char *user, int info_arg) 
 // remove elementos (usada tanto por rmdir quanto por rm)
 int cmd_remove(int current_inode, const char *filepath, const char *user, int remove_dir) {
     if (!filepath || !user) return -1;
-
-    char path_copy[1024];
-    strncpy(path_copy, filepath, sizeof(path_copy) - 1);
-    path_copy[sizeof(path_copy) - 1] = '\0';
-    
 
     char parent_path[1024];
     char name[MAX_NAMESIZE];
