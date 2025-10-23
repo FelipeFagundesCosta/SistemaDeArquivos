@@ -991,6 +991,20 @@ int createSymlink(int parent_inode, int target_index, const char *link_name, con
     return 0;
 }
 
+int deleteSymlink(int parent_inode, int target_inode_idx, const char *user){
+    if (parent_inode < 0 || parent_inode >= MAX_INODES || !target_inode_idx) return -1;
+
+    inode_t *target = &inode_table[target_inode_idx];
+    if (!hasPermission(target, user, PERM_WRITE)) return -1;
+
+    if (target->type != FILE_SYMLINK) return -1;
+
+    if (dirRemoveEntry(parent_inode, target->name, target->type) == -1) return -1;
+    freeInode(target_inode_idx);
+    sync_fs();
+    return 0;
+}
+
 /* Encontra inode a partir de um path */
 int resolvePath(const char *path, int current_inode, int *inode_out) {
     if (!path || !inode_out) return -1;
@@ -1467,7 +1481,7 @@ int cmd_remove(int current_inode, const char *filepath, const char *user, int re
 
     // Verifica conforme o tipo de rm (e.g. rm ou rmdir)
     if (remove_dir) {
-        if (target->type != FILE_DIRECTORY && target->type != FILE_SYMLINK) {
+        if (target->type != FILE_DIRECTORY) {
             printf("rmdir: não é um diretório: %s\n", filepath);
             return -1;
         }
@@ -1477,7 +1491,7 @@ int cmd_remove(int current_inode, const char *filepath, const char *user, int re
         }
         return 0;
     } else {
-        if (target->type == FILE_DIRECTORY || target->type == FILE_SYMLINK) {
+        if (target->type == FILE_DIRECTORY) {
             printf("rm: não é possível remover '%s': é um diretório\n", filepath);
             return -1;
         }
@@ -1497,4 +1511,42 @@ int cmd_rm(int current_inode, const char *filepath, const char *user) {
 // rmdir (remove diretorio)
 int cmd_rmdir(int current_inode, const char *filepath, const char *user) {
     return cmd_remove(current_inode, filepath, user, 1);
+}
+
+int cmd_unlink(int current_inode, const char *filepath, const char *user){
+    if (!filepath || !user) return -1;
+
+    char parent_path[1024];
+    char name[MAX_NAMESIZE];
+
+    // Encontra a última barra para separar caminho/nome
+    splitPath(filepath, parent_path, name);
+    
+    // resolve o inode do diretorio pai
+    int parent_inode;
+    if (resolvePath(parent_path, current_inode, &parent_inode) != 0) {
+        printf("Link não encontrado\n");
+        return -1;
+    }
+
+    // Procura o arquivo com o nome dentro do diretório pai
+    int target_inode;
+    if (dirFindEntry(parent_inode, name, FILE_ANY, &target_inode) != 0) {
+        printf("Link não encontrado\n");
+        return -1;
+    }
+
+    inode_t *target = &inode_table[target_inode];
+
+    // Verifica se é um link simbolico
+    if (target->type != FILE_SYMLINK) {
+        printf("Alvo não é um link: %s\n", filepath);
+        return -1;
+        }
+
+    if (deleteSymlink(parent_inode, target_inode, user) != 0) {
+            printf("Não foi possível remover '%s'\n", filepath);
+            return -1;
+        }
+    return 0;
 }

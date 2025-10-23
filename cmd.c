@@ -105,6 +105,9 @@ int main() {
         else if (strcmp(cmd, "su") == 0 && arg1){
             strncpy(user, arg1, 10);
         }
+        else if (strcmp(cmd, "unlink") == 0 && arg1){
+            cmd_unlink(current_inode, arg1, user);
+        }
         else {
             printf("Comando não reconhecido\n");
         }
