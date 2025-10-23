@@ -738,26 +738,37 @@ int createDirectoriesRecursively(const char *path, int current_inode, const char
 /* Deleta diretorio existente */
 int deleteDirectory(int parent_inode, const char *name, const char *user){
     if (parent_inode < 0 || parent_inode >= MAX_INODES || !name) return -1;
+
     int target_inode;
     if (dirFindEntry(parent_inode, name, FILE_DIRECTORY, &target_inode) != 0) return -1;
 
-    inode_t *inode = &inode_table[target_inode];
-    if (!hasPermission(inode, user, PERM_WRITE)) return -1;
-
     inode_t *target = &inode_table[target_inode];
+    if (!hasPermission(target, user, PERM_WRITE)) return -1;
     if (target->type != FILE_DIRECTORY) return -1;
 
     for (int i = 0; i < BLOCKS_PER_INODE; i++) {
         if (target->blocks[i] == 0) continue;
-        dir_entry_t entries[BLOCK_SIZE / sizeof(dir_entry_t)];
-        if (readBlock(target->blocks[i], entries) != 0) return -1;
-        for (int j = 0; j < BLOCK_SIZE / sizeof(dir_entry_t); j++) {
+
+        char *raw = malloc(BLOCK_SIZE);
+        if (!raw) return -1;
+
+        if (readBlock(target->blocks[i], raw) != 0) {
+            free(raw);
+            return -1;
+        }
+        dir_entry_t *entries = (dir_entry_t *) raw;
+        size_t num_entries = BLOCK_SIZE / sizeof(dir_entry_t);
+        if (!entries) return -1;
+
+        for (size_t j = 0; j < num_entries; j++) {
             if (entries[j].inode_index != 0 &&
                 strcmp(entries[j].name, ".") != 0 &&
                 strcmp(entries[j].name, "..") != 0) {
-                return -1;
+                    free(raw);
+                    return -1; // diretorio nao vazio
             }
         }
+        free(entries);
     }
 
     if (dirRemoveEntry(parent_inode, name, FILE_DIRECTORY) != 0) return -1;
@@ -1532,6 +1543,7 @@ int cmd_rm(int current_inode, const char *filepath, const char *user) {
 
 // rmdir (remove diretorio)
 int cmd_rmdir(int current_inode, const char *filepath, const char *user) {
+    printf("passou");
     return cmd_remove(current_inode, filepath, user, 1);
 }
 
