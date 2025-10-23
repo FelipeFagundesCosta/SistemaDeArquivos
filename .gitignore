@@ -1,5 +1,7 @@
 disk.dat
 
+.vscode
+
 *.o
 *.out
 teste
