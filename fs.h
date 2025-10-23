@@ -122,9 +122,7 @@ int createDirectory(int parent_inode, const char *name, const char *user);
 int deleteDirectory(int parent_inode, const char *name, const char *user);
 int createFile(int parent_inode, const char *name, const char *user);
 int deleteFile(int parent_inode, const char *name, const char *user);
-fs_dir_list_t listElements(int parent_inode);
 int addContentToInode(int inode_number, const char *data, size_t data_size, const char *user);
-ssize_t getFileSize(int parent_inode, const char *name);
 int readContentFromInode(int inode_number, char *buffer, size_t buffer_size, size_t *out_bytes, const char *user);
 
 int resolvePath(const char *path, int current_inode, int *inode_out);
@@ -149,16 +147,6 @@ int cmd_ln_s(int current_inode, const char *target_path, const char *link_path, 
 int cmd_ls(int current_inode, const char *path, const char *user, int info_args);
 int cmd_rm(int current_inode, const char *filepath, const char *user);
 int cmd_rmdir(int current_inode, const char *filepath, const char *user);
-
-/* Layout */
-size_t block_bitmap_bytes(void);
-size_t inode_bitmap_bytes(void);
-size_t inode_table_bytes(void);
-size_t meta_region_bytes(void);
-off_t  offset_block_bitmap(void);
-off_t  offset_inode_bitmap(void);
-off_t  offset_inode_table(void);
-off_t  offset_data_region(void);
 
 /* Variáveis globais */
 extern unsigned char *block_bitmap;

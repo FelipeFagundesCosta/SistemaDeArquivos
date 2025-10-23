@@ -27,15 +27,10 @@ size_t computed_inode_table_bytes = 0;
 uint32_t computed_meta_blocks = 0;
 uint32_t computed_data_blocks = 0;
 
-/* ---- Funções utilitárias ---- */
-size_t inode_bitmap_bytes(void) { return (MAX_INODES + 7) / 8; }
-size_t inode_table_bytes(void) { return MAX_INODES * sizeof(inode_t); }
-size_t block_bitmap_bytes(void) { return computed_block_bitmap_bytes; }
-
 /* ---- Calcula layout do FS ---- */
 static void compute_layout(void) {
-    size_t inode_bmap_bytes = inode_bitmap_bytes();
-    size_t inode_tbl_bytes = inode_table_bytes();
+    size_t inode_bmap_bytes = (MAX_INODES + 7) / 8;
+    size_t inode_tbl_bytes = MAX_INODES * sizeof(inode_t);
 
     /* Primeiro assumimos todos os blocos de dados disponíveis */
     size_t data_blocks = MAX_BLOCKS;
@@ -230,10 +225,6 @@ int unmount_fs(void) {
 }
 
 /* ----- Utilitarios --------*/
-
-
-
-
 const char *format_time(time_t t, char *buf, size_t buflen) {
     if (!buf || buflen == 0) return NULL;
     struct tm tm;
@@ -244,8 +235,6 @@ const char *format_time(time_t t, char *buf, size_t buflen) {
     strftime(buf, buflen, "%Y-%m-%d %H:%M:%S", &tm);
     return buf;
 }
-
-
 
 
 int show_inode_info(int inode_index) {
@@ -656,6 +645,64 @@ int createDirectory(int parent_inode, const char *name, const char *user){
     return 0;
 }
 
+int createDirectoriesRecursively(const char *path, int current_inode, const char *user) {
+    if (!path || !user) return -1;
+    if (path[0] == '\0') return -1;
+
+    // Se path == "." nada a fazer
+    if (strcmp(path, ".") == 0) return 0;
+
+    // Vamos caminhar token por token, tentando resolver cada nível e criando quando não existir.
+    int cur = current_inode;
+
+    // Se começa com '~', trate como absoluto
+    const char *p = path;
+    if (p[0] == '~') {
+        cur = ROOT_INODE;
+        p++;
+        if (*p == '/') p++;
+    }
+
+    char token[256];
+    while (*p) {
+        int i = 0;
+        // extrai token até '/' ou fim
+        while (*p && *p != '/' && i < (int)sizeof(token)-1) token[i++] = *p++;
+        token[i] = '\0';
+        if (*p == '/') p++; // pula '/'
+
+        if (token[0] == '\0' || strcmp(token, ".") == 0) continue;
+        if (strcmp(token, "..") == 0) {
+            int parent_inode;
+            if (dirFindEntry(cur, "..", FILE_DIRECTORY, &parent_inode) != 0) return -1;
+            cur = parent_inode;
+            continue;
+        }
+
+        int next_inode;
+        // tentamos achar token no diretório atual (aceitamos FILE_DIRECTORY ou FILE_SYMLINK -> seguido)
+        if (dirFindEntry(cur, token, FILE_DIRECTORY, &next_inode) != 0) {
+            // não existe -> criar diretório aqui
+            if (createDirectory(cur, token, user) != 0) {
+                return -1;
+            }
+            // recuperar inode do diretório criado
+            if (dirFindEntry(cur, token, FILE_DIRECTORY, &next_inode) != 0) return -1;
+        }
+
+        // se for symlink, resolva link_target_index (resolvePath já faz isso, mas como estamos passo a passo:)
+        int depth = 0;
+        while (inode_table[next_inode].type == FILE_SYMLINK) {
+            next_inode = inode_table[next_inode].link_target_index;
+            if (++depth > 16) return -1;
+        }
+
+        cur = next_inode;
+    }
+
+    return 0;
+}
+
 int deleteDirectory(int parent_inode, const char *name, const char *user){
     if (parent_inode < 0 || parent_inode >= MAX_INODES || !name) return -1;
     int target_inode;
@@ -742,82 +789,6 @@ int deleteFile(int parent_inode, const char *name, const char *user){
     return 0;
 }
 
-fs_dir_list_t listElements(int parent_inode) {
-    fs_dir_list_t result = {NULL, 0};
-
-    if (parent_inode < 0 || parent_inode >= MAX_INODES) return result;
-
-    inode_t *dir = &inode_table[parent_inode];
-    int depth = 0;
-    while (dir->type == FILE_SYMLINK){
-        dir = &inode_table[dir->link_target_index];
-        if (++depth > 16) return result;
-    }
-    if (dir->type != FILE_DIRECTORY) return result;
-
-    int capacity = 16; // capacidade inicial do array
-    fs_entry_t *temp = calloc(capacity, sizeof(fs_entry_t));
-    if (!temp) return result;
-
-    int count = 0;
-    int current_inode = parent_inode;
-
-    while (current_inode >= 0) {
-        dir = &inode_table[current_inode];
-
-        for (int i = 0; i < BLOCKS_PER_INODE; i++) {
-            uint32_t block_index = dir->blocks[i];
-            if (block_index == 0) continue;
-
-            dir_entry_t entries[BLOCK_SIZE / sizeof(dir_entry_t)];
-            if (readBlock(block_index, entries) != 0) continue;
-
-            for (int j = 0; j < BLOCK_SIZE / sizeof(dir_entry_t); j++) {
-                if (entries[j].inode_index == 0) continue;
-                if (strcmp(entries[j].name, ".") == 0 || strcmp(entries[j].name, "..") == 0) continue;
-
-                inode_t *child = &inode_table[entries[j].inode_index];
-
-                if (count >= capacity) {
-                    capacity *= 2;
-                    fs_entry_t *new_temp = realloc(temp, capacity * sizeof(fs_entry_t));
-                    if (!new_temp) {
-                        free(temp);
-                        result.entries = NULL;
-                        result.count = 0;
-                        return result;
-                    }
-                    temp = new_temp;
-                }
-
-                fs_entry_t *entry = &temp[count++];
-                entry->inode_index = entries[j].inode_index;
-                entry->type = child->type;
-
-                strncpy(entry->name, child->name, MAX_NAMESIZE - 1);
-                entry->name[MAX_NAMESIZE - 1] = '\0';
-
-                strncpy(entry->creator, child->creator, MAX_NAMESIZE - 1);
-                entry->creator[MAX_NAMESIZE - 1] = '\0';
-
-                strncpy(entry->owner, child->owner, MAX_NAMESIZE - 1);
-                entry->owner[MAX_NAMESIZE - 1] = '\0';
-
-                entry->size = child->size;
-                entry->permissions = child->permissions;
-                entry->creation_date = child->creation_date;
-                entry->modification_date = child->modification_date;
-            }
-        }
-
-        if (dir->next_inode == 0) break;
-        current_inode = dir->next_inode;
-    }
-
-    result.entries = temp;
-    result.count = count;
-    return result;
-}
 
 int addContentToInode(int inode_index, const char *data, size_t data_size, const char *user) {
     if (!data || !user) return -1;
@@ -922,19 +893,6 @@ int addContentToInode(int inode_index, const char *data, size_t data_size, const
     return sync_fs();
 }
 
-
-
-ssize_t getFileSize(int parent_inode, const char *name) {
-    int file_inode_index;
-    if (dirFindEntry(parent_inode, name, FILE_REGULAR, &file_inode_index) != 0)
-        return -1;
-
-    inode_t *inode = &inode_table[file_inode_index];
-    if (!inode) return -1;
-
-    return inode->size;
-}
-
 int readContentFromInode(int inode_number, char *buffer, size_t buffer_size, size_t *out_bytes, const char *user) {
     if (!buffer || !out_bytes || !user) return -1;
 
@@ -986,6 +944,44 @@ int readContentFromInode(int inode_number, char *buffer, size_t buffer_size, siz
     return 0;
 }
 
+
+int createSymlink(int parent_inode, int target_index, const char *link_name, const char *user) {
+    // 1. Verifica se link_name já existe
+    int dummy_output;
+    if (!dirFindEntry(parent_inode, link_name, FILE_SYMLINK, &dummy_output)) return -1; // erro, já existe
+    
+
+    inode_t *parent = &inode_table[parent_inode];
+    if (!hasPermission(parent, user, PERM_WRITE)) return -1;
+
+    // 2. Aloca um novo i-node
+    int inode_index = allocateInode();
+    inode_t *inode = &inode_table[inode_index];
+    if (!inode) return -1;
+
+    // 3. Preenche campos
+    strncpy(inode->name, link_name, MAX_NAMESIZE-1);
+    inode->name[MAX_NAMESIZE-1] = '\0';
+    inode->type = FILE_SYMLINK;
+    inode->size = 0;
+    inode->link_target_index = target_index;
+    inode->creation_date = time(NULL);
+    inode->modification_date = inode->creation_date;
+    strncpy(inode->creator, user, MAX_NAMESIZE-1);
+    inode->creator[MAX_NAMESIZE-1] = '\0';
+    strncpy(inode->owner, user, MAX_NAMESIZE-1);
+    inode->owner[MAX_NAMESIZE-1] = '\0';
+    inode->permissions = inode_table[target_index].permissions;
+
+    if (dirAddEntry(parent_inode, link_name, FILE_SYMLINK, inode_index) != 0){
+        freeInode(inode_index);
+        return -1;
+    }
+
+    sync_inode(inode_index);
+    return 0;
+}
+
 int resolvePath(const char *path, int current_inode, int *inode_out) {
     if (!path || !inode_out) return -1;
 
@@ -1034,101 +1030,20 @@ int resolvePath(const char *path, int current_inode, int *inode_out) {
     return 0;
 }
 
-
-int createSymlink(int parent_inode, int target_index, const char *link_name, const char *user) {
-    // 1. Verifica se link_name já existe
-    int dummy_output;
-    if (!dirFindEntry(parent_inode, link_name, FILE_SYMLINK, &dummy_output)) return -1; // erro, já existe
-    
-
-    inode_t *parent = &inode_table[parent_inode];
-    if (!hasPermission(parent, user, PERM_WRITE)) return -1;
-
-    // 2. Aloca um novo i-node
-    int inode_index = allocateInode();
-    inode_t *inode = &inode_table[inode_index];
-    if (!inode) return -1;
-
-    // 3. Preenche campos
-    strncpy(inode->name, link_name, MAX_NAMESIZE-1);
-    inode->name[MAX_NAMESIZE-1] = '\0';
-    inode->type = FILE_SYMLINK;
-    inode->size = 0;
-    inode->link_target_index = target_index;
-    inode->creation_date = time(NULL);
-    inode->modification_date = inode->creation_date;
-    strncpy(inode->creator, user, MAX_NAMESIZE-1);
-    inode->creator[MAX_NAMESIZE-1] = '\0';
-    strncpy(inode->owner, user, MAX_NAMESIZE-1);
-    inode->owner[MAX_NAMESIZE-1] = '\0';
-    inode->permissions = inode_table[target_index].permissions;
-
-    if (dirAddEntry(parent_inode, link_name, FILE_SYMLINK, inode_index) != 0){
-        freeInode(inode_index);
-        return -1;
+// Função auxiliar para separar caminho e último segmento
+static void splitPath(const char *full_path, char *dir_path, char *base_name) {
+    const char *last_slash = strrchr(full_path, '/');
+    if (last_slash) {
+        size_t dir_len = last_slash - full_path;
+        strncpy(dir_path, full_path, dir_len);
+        dir_path[dir_len] = '\0';
+        strcpy(base_name, last_slash + 1);
+    } else {
+        strcpy(dir_path, "."); // diretório atual
+        strcpy(base_name, full_path);
     }
-
-    sync_inode(inode_index);
-    return 0;
 }
 
-int createDirectoriesRecursively(const char *path, int current_inode, const char *user) {
-    if (!path || !user) return -1;
-    if (path[0] == '\0') return -1;
-
-    // Se path == "." nada a fazer
-    if (strcmp(path, ".") == 0) return 0;
-
-    // Vamos caminhar token por token, tentando resolver cada nível e criando quando não existir.
-    int cur = current_inode;
-
-    // Se começa com '~' (você já trata isso no resolvePath), trate como absoluto
-    const char *p = path;
-    if (p[0] == '~') {
-        cur = ROOT_INODE;
-        p++;
-        if (*p == '/') p++;
-    }
-
-    char token[256];
-    while (*p) {
-        int i = 0;
-        // extrai token até '/' ou fim
-        while (*p && *p != '/' && i < (int)sizeof(token)-1) token[i++] = *p++;
-        token[i] = '\0';
-        if (*p == '/') p++; // pula '/'
-
-        if (token[0] == '\0' || strcmp(token, ".") == 0) continue;
-        if (strcmp(token, "..") == 0) {
-            int parent_inode;
-            if (dirFindEntry(cur, "..", FILE_DIRECTORY, &parent_inode) != 0) return -1;
-            cur = parent_inode;
-            continue;
-        }
-
-        int next_inode;
-        // tentamos achar token no diretório atual (aceitamos FILE_DIRECTORY ou FILE_SYMLINK -> seguido)
-        if (dirFindEntry(cur, token, FILE_DIRECTORY, &next_inode) != 0) {
-            // não existe -> criar diretório aqui
-            if (createDirectory(cur, token, user) != 0) {
-                return -1;
-            }
-            // recuperar inode do diretório criado
-            if (dirFindEntry(cur, token, FILE_DIRECTORY, &next_inode) != 0) return -1;
-        }
-
-        // se for symlink, resolva link_target_index (resolvePath já faz isso, mas como estamos passo a passo:)
-        int depth = 0;
-        while (inode_table[next_inode].type == FILE_SYMLINK) {
-            next_inode = inode_table[next_inode].link_target_index;
-            if (++depth > 16) return -1;
-        }
-
-        cur = next_inode;
-    }
-
-    return 0;
-}
 
 /* ---- Comandos de FS ---- */
 
@@ -1144,20 +1059,6 @@ int cmd_cd(int *current_inode, const char *path) {
 
     *current_inode = target_inode;
     return 0;
-}
-
-// Função auxiliar para separar caminho e último segmento
-static void splitPath(const char *full_path, char *dir_path, char *base_name) {
-    const char *last_slash = strrchr(full_path, '/');
-    if (last_slash) {
-        size_t dir_len = last_slash - full_path;
-        strncpy(dir_path, full_path, dir_len);
-        dir_path[dir_len] = '\0';
-        strcpy(base_name, last_slash + 1);
-    } else {
-        strcpy(dir_path, "."); // diretório atual
-        strcpy(base_name, full_path);
-    }
 }
 
 // mkdir com criação recursiva (estilo cp)
