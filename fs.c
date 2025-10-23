@@ -347,17 +347,18 @@ int allocateInode(void) {
 
 /* Libera inode existent */
 void freeInode(int inode_index) {
+    if (inode_index < 0 || inode_index >= MAX_INODES) return;
+
     if (inode_table[inode_index].next_inode){
         freeInode(inode_table[inode_index].next_inode);
     }
-    if (inode_index >= 0 && inode_index < MAX_INODES){
-        uint32_t byte = inode_index / 8;
-        uint8_t bit = inode_index % 8;
-        inode_bitmap[byte] &= ~(1 << bit);
-        inode_table[inode_index].type = 0;
-        memset(inode_table[inode_index].blocks, 0, sizeof(inode_table[inode_index].blocks));
-        inode_table[inode_index].next_inode = 0;
-    }
+
+    uint32_t byte = inode_index / 8;
+    uint8_t bit = inode_index % 8;
+    inode_bitmap[byte] &= ~(1 << bit);
+    inode_table[inode_index].type = 0;
+    memset(inode_table[inode_index].blocks, 0, sizeof(inode_table[inode_index].blocks));
+    inode_table[inode_index].next_inode = 0;
 }
 
 /* ---- leitura e escrita ---- */
