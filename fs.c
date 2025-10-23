@@ -325,6 +325,7 @@ void freeBlock(int block_index) {
     if (block_index >= 0 && block_index < (int)computed_data_blocks) {
         uint32_t byte = block_index / 8;
         uint8_t bit = block_index % 8;
+        if ((block_bitmap[byte] & (1 << bit)) == 0) return;
         block_bitmap[byte] &= ~(1 << bit);
     }
 }
@@ -347,18 +348,25 @@ int allocateInode(void) {
 
 /* Libera inode existent */
 void freeInode(int inode_index) {
-    if (inode_index < 0 || inode_index >= MAX_INODES) return;
+    if (inode_index < 0 || inode_index >= MAX_INODES)
+        return;
 
-    if (inode_table[inode_index].next_inode){
-        freeInode(inode_table[inode_index].next_inode);
+    inode_t *inode = &inode_table[inode_index];
+
+    for (int i = 0; i < BLOCKS_PER_INODE; i++) {
+        int block = inode->blocks[i];
+        if (block > 0)
+            freeBlock(block);
     }
+
+    if (inode->next_inode)
+        freeInode(inode->next_inode);
 
     uint32_t byte = inode_index / 8;
     uint8_t bit = inode_index % 8;
     inode_bitmap[byte] &= ~(1 << bit);
-    inode_table[inode_index].type = 0;
-    memset(inode_table[inode_index].blocks, 0, sizeof(inode_table[inode_index].blocks));
-    inode_table[inode_index].next_inode = 0;
+
+    memset(inode, 0, sizeof(inode_t));
 }
 
 /* ---- leitura e escrita ---- */
